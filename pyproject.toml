@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentcourt"
+version = "0.1.0"
+description = "Autonomous On-Chain Escrow & AI Dispute Resolution Protocol on Base Mainnet"
+requires-python = ">=3.9"
+dependencies = [
+    "web3>=6.15.0",
+    "pydantic>=2.6.0",
+    "python-dotenv>=1.0.0"
+]
