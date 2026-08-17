@@ -1,3 +1,25 @@
+
+import os
+try:
+    import streamlit as st
+    secrets = dict(st.secrets)
+except Exception:
+    secrets = {}
+
+def get_secret(key, default=None):
+    if key in secrets:
+        return secrets[key]
+    if key in os.environ:
+        return os.environ[key]
+    try:
+        from dotenv import dotenv_values
+        env_dict = dotenv_values(".env")
+        if key in env_dict:
+            return env_dict[key]
+    except Exception:
+        pass
+    return default
+
 import json
 import os
 from dotenv import dotenv_values
@@ -26,9 +48,9 @@ for rpc in RPC_POOL:
 if not w3 or not w3.is_connected():
     w3 = Web3(Web3.HTTPProvider("https://mainnet.base.org"))
 
-account = w3.eth.account.from_key(config["PRIVATE_KEY"])
+account = w3.eth.account.from_key(get_secret("PRIVATE_KEY"))
 CLIENT_ADDR = account.address
-PRIVATE_KEY = config["PRIVATE_KEY"]
+PRIVATE_KEY = get_secret("PRIVATE_KEY")
 
 with open("mainnet_escrow_address.txt", "r") as f:
     ESCROW_ADDRESS = w3.to_checksum_address(f.read().strip())
