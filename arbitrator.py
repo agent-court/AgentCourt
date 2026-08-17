@@ -30,7 +30,7 @@ def _clean_json_response(raw_text: str) -> dict:
 
 
 def _evaluate_claude(prompt: str) -> dict:
-    """Juror 1: Anthropic Claude (Auto-discovers active account model)"""
+    """Juror 1: Anthropic Claude (Auto-discovers active account model + handles ThinkingBlocks)"""
     if not ANTHROPIC_API_KEY:
         raise ValueError("ANTHROPIC_API_KEY not configured")
     
@@ -47,7 +47,14 @@ def _evaluate_claude(prompt: str) -> dict:
         max_tokens=600,
         messages=[{"role": "user", "content": prompt}]
     )
-    data = _clean_json_response(res.content[0].text)
+    
+    # Extract the actual text block (skipping any thinking blocks)
+    full_text = ""
+    for block in res.content:
+        if getattr(block, "type", "") == "text" or hasattr(block, "text"):
+            full_text += block.text
+            
+    data = _clean_json_response(full_text)
     data["juror"] = f"Anthropic ({target_model})"
     return data
 
