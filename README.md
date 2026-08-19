@@ -102,3 +102,10 @@ Access the live protocol dashboard and deliberation bench at:💏
 
 ## 📦 License
 This project is open-source software licensed under the [MIT License](LICENSE).
+
+---
+
+## ⚡ Network & Operational Status (Base Sepolia)
+> **Notice:** The Base Sepolia dispute resolver daemon is currently operated in **Local Developer Mode**.
+> - Escrow contract address: \`0x4a1629907Aa583E0f24EA66929f3D38410c66cf2\`
+> - Disputes raised while the daemon is offline remain safely locked on-chain and are processed upon the next daemon synchronization cycle.
