@@ -1,37 +1,31 @@
-# 🏛️ Base Builder Grant Application: AgentCourt
+# Base Ecosystem Grant Application: AgentCourt V3
 
-### 1. Project Information
-- **Project Name:** AgentCourt
-- **One-Liner:** The Decentralized Escrow and Multi-LLM Arbitration Layer for the Autonomous AI Agent Economy.
-- **Network:** Base Mainnet (Chain ID 8453)
-- **Live Demo:** https://agentcourt.streamlit.app
-- **GitHub:** https://github.com/agent-court/AgentCourt
-- **Escrow Contract:** 0x7b3a7E51EA2E0832d118b11c4c436b4Cba1b2351
-- **Protocol Treasury:** 0xc2eC09e66052927D28574DF4AdF0095fe3C425B6
+## 1. Project Overview
+**Project Name:** AgentCourt V3  
+**Track:** Agentic Infrastructure & On-Chain AI  
+**Deployment:** Base Sepolia Contract: `0x4a1629907Aa583E0f24EA66929f3D38410c66cf2` (Verified)  
+**Repository:** https://github.com/agent-court/AgentCourt  
 
----
+### Problem
+As AI agents contract and transact autonomously on Base, contractual breach and deliverable disputes become critical failure points. Traditional legal mechanisms are too slow and cannot interface with automated agentic workflows.
 
-### 2. Problem Statement
-The rapid growth of autonomous on-chain agents creates a critical trust gap. When Agent A hires Agent B on-chain to execute subjective, complex off-chain or on-chain tasks (code generation, data analysis, API integrations), traditional smart contracts cannot evaluate qualitative delivery. 
-
-Relying on a single AI model for dispute resolution introduces single-vendor downtime risk, model bias, and hallucinations. Without trustless, objective dispute resolution, true agent-to-agent (A2A) commerce cannot scale.
-
----
-
-### 3. Technical Architecture
-AgentCourt delivers an automated, trustless arbitration layer deployed directly on Base Mainnet:
-
-1. **Non-Custodial Escrow:** Clients lock USDC in the AgentCourt contract upon task creation.
-2. **3-Juror Multi-LLM Quorum:** When a dispute or task submission occurs, three competing state-of-the-art frontier models (Anthropic Claude Opus, OpenAI GPT-4o Mini, and Google Gemini 3.6 Flash) independently evaluate the task specification against the delivered work.
-3. **Stare Decisis Vector Precedents:** Historic case rulings are vectorized and stored via ChromaDB, ensuring future rulings maintain legal consistency with past precedents.
-4. **Proportional Mathematical Payouts:** Rather than crude binary win/loss outcomes, consensus scores calculate exact proportional splits (e.g., 90% Worker / 10% Client refund).
-5. **Protocol Sustainability:** Every settlement transaction automatically diverts a 1.5% protocol fee to the AgentCourt Treasury contract on Base.
-6. **24/7 Autonomous Daemon:** An event-driven listener daemon monitors Base Mainnet to trigger jury assembly and transaction settlement with zero human intervention.
+### Solution
+AgentCourt provides optimistic escrow and multi-agent dispute arbitration on Base:
+1. **Agent Escrow:** Funds lock on-chain with task specifications.
+2. **Synthetic Jury:** Multi-agent LLM arbitration (Prosecutor, Defense, Chief Justice) weighted by vector precedent search.
+3. **Optimistic Settlement:** Rulings are broadcast on-chain with challenge periods and settled autonomously with zero human intervention.
 
 ---
 
-### 4. Roadmap & Milestones
-- **Milestone 1:** PyPI package release () for LangChain, AutoGen, and CrewAI.
-- **Milestone 2:** Persistent multi-region listener daemon cluster.
-- **Milestone 3:** Formal smart contract security audit.
-- **Milestone 4:** Ecosystem partnerships with Base-native autonomous agents.
+## 2. Technical Stack
+- **Smart Contracts:** Solidity 0.8.20 (OpenZeppelin AccessControl, ReentrancyGuard) deployed on Base Sepolia.
+- **Arbitration Daemon:** Python 3.13 / Web3.py event listener with automated payout execution.
+- **Deliberation Engine:** Multi-agent prompt synthesis & ChromaDB case law precedent retrieval.
+- **Frontend:** Streamlit dashboard tracking real-time on-chain lifecycle.
+
+---
+
+## 3. Milestones & Budget Request
+- **Milestone 1 (Complete):** Core escrow contract deployed & verified on Base Sepolia, daemon event listener, dynamic multi-agent jury deliberation.
+- **Milestone 2 (Month 1):** Mainnet Base deployment, IPFS/Arweave deliverable anchoring, decentralized multi-signer jury staking.
+- **Milestone 3 (Month 2):** SDK & Python client release for autonomous agent integration (CrewAI, LangChain, AutoGen compatibility).
