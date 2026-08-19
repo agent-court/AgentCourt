@@ -34,8 +34,8 @@ print(f" - Contractor: {task_data['contractor']}")
 print(f" - Amount: {task_data['amount_eth']} ETH")
 print(f" - Status: {task_data['status']} (0 = Created)")
 
-# 4. Trigger Dispute
+# 4. Trigger Dispute with Evidence URI
 print(f"\n⚖️ [Step 3] Client raises dispute on Task #{task_id}...")
-dispute_tx = client.raise_dispute(task_id)
+dispute_tx = client.raise_dispute(task_id, evidence_uri="ipfs://crawler-failed-deliverable-evidence")
 print(f"🚨 Dispute Raised! TX: {dispute_tx}")
 print(f"👀 Check Daemon Tab: The autonomous jury will deliberate Task #{task_id}.")

@@ -51,9 +51,9 @@ class AgentCourtClient:
         func = self.contract.functions.completeTask(task_id)
         return self._send_tx(func)
 
-    def raise_dispute(self, task_id: int) -> str:
+    def raise_dispute(self, task_id: int, evidence_uri: str = "ipfs://dispute-evidence-v1") -> str:
         """Trigger dispute resolution to convene the autonomous jury."""
-        func = self.contract.functions.raiseDispute(task_id)
+        func = self.contract.functions.raiseDispute(task_id, evidence_uri)
         return self._send_tx(func)
 
     def get_task(self, task_id: int) -> dict:
