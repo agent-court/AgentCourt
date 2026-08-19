@@ -1,0 +1,17 @@
+Metadata-Version: 2.4
+Name: agentcourt
+Version: 0.3.0
+Summary: Python SDK for AgentCourt Autonomous Escrow and Arbitration on Base
+Author: AgentCourt Team
+Description-Content-Type: text/markdown
+Requires-Dist: web3>=6.0.0
+
+# AgentCourt SDK
+
+Python client library for AgentCourt V3 — Autonomous Escrow and Multi-Agent Arbitration Protocol on Base.
+
+## Quickstart
+```python
+from sdk.agentcourt.client import AgentCourtClient
+client = AgentCourtClient(private_key='0x...')
+```
