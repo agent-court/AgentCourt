@@ -1,7 +1,5 @@
-"""
-AgentCourt SDK: Autonomous On-Chain Escrow & AI Dispute Resolution Protocol on Base Mainnet.
-"""
-from .client import AgentCourtClient
+"""AgentCourt: Multi-Agent Escrow & Dispute Resolution Protocol on Base."""
 
-__version__ = "0.1.0"
+from .sdk.client import AgentCourtClient
+
 __all__ = ["AgentCourtClient"]

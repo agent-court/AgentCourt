@@ -1,0 +1,22 @@
+
+# Environment & Secrets
+.env
+*.env*
+*.key
+*.pem
+keys.json
+*private_key*
+
+# Python caches
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Node / Contract Artifacts
+node_modules/
+artifacts/
+cache/
+out/
+
+# Local Vector DB
+chroma_db/
