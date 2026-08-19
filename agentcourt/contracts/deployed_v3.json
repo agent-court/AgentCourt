@@ -1,0 +1,7 @@
+{
+  "network": "https://base-sepolia-rpc.publicnode.com",
+  "contract_address": "0x4a1629907Aa583E0f24EA66929f3D38410c66cf2",
+  "admin": "0x7807d927C720bdEE226AbaC41E0793326c5b62c6",
+  "court": "0x7807d927C720bdEE226AbaC41E0793326c5b62c6",
+  "tx_hash": "268b3c457a32651258bb430592d6f2e4653c9e68ba14681d52e7819bf0122770"
+}
