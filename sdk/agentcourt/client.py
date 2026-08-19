@@ -13,7 +13,6 @@ class AgentCourtClient:
         
         abi_path = os.path.join(os.path.dirname(__file__), "abi.json")
         if not os.path.exists(abi_path):
-            # Fallback path if running from repo root
             abi_path = "contracts/AgentEscrowV3_abi.json" if os.path.exists("contracts/AgentEscrowV3_abi.json") else "agentcourt/contracts/AgentEscrowV3_abi.json"
         
         with open(abi_path, "r") as f:
@@ -47,9 +46,9 @@ class AgentCourtClient:
         )
         return self._send_tx(func, value_wei=value_wei)
 
-    def submit_task(self, task_id: int) -> str:
+    def submit_work(self, task_id: int) -> str:
         """Contractor marks the task as completed/submitted."""
-        func = self.contract.functions.submitTask(task_id)
+        func = self.contract.functions.submitWork(task_id)
         return self._send_tx(func)
 
     def raise_dispute(self, task_id: int) -> str:
