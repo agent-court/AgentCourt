@@ -1,5 +1,10 @@
-"""AgentCourt: Multi-Agent Escrow & Dispute Resolution Protocol on Base."""
+"""
+AgentCourt SDK: Trust-minimized AI neural dispute arbitration on Base.
+"""
 
-from .sdk.client import AgentCourtClient
+from .client import AgentCourtClient
+from .arbitrator import arbitrate_task
+from .vector_precedents import find_relevant_precedents, record_new_precedent
 
-__all__ = ["AgentCourtClient"]
+__version__ = "0.1.0"
+__all__ = ["AgentCourtClient", "arbitrate_task", "find_relevant_precedents", "record_new_precedent"]
