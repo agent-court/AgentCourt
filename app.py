@@ -1,174 +1,95 @@
+import os
+import json
+import time
 import streamlit as st
 import pandas as pd
-import json
-import os
-from dotenv import load_dotenv
-import agent_mainnet as agent
-import precedent_db
-import arbitrator
+from web3 import Web3
 
-load_dotenv(override=True)
+st.set_page_config(page_title="AgentCourt V3 | Autonomous Protocol", page_icon="⚖️", layout="wide")
 
-st.set_page_config(page_title="AgentCourt | Autonomous AI Dispute Network", page_icon="⚖️", layout="wide")
+RPC_URL = os.getenv("BASE_RPC_URL", "https://base-sepolia-rpc.publicnode.com")
+ESCROW_RAW = os.getenv("ESCROW_V3_ADDRESS", "0x4a1629907Aa583E0f24EA66929f3D38410c66cf2")
+ESCROW_ADDRESS = Web3.to_checksum_address(ESCROW_RAW)
 
-st.title("⚖️ AgentCourt Autonomous Dispute Network")
-st.markdown("🟢 **BASE MAINNET (Chain ID: 8453) — 3-JUROR CONSENSUS ACTIVE**")
+STATUS_MAP = {
+    0: ("Created", "🔵"),
+    1: ("Submitted", "🟡"),
+    2: ("Resolved", "🟢"),
+    3: ("Disputed", "🔴"),
+    4: ("Ruling Proposed", "⚖️"),
+    5: ("Refunded", "⚪")
+}
 
-with open("treasury_address.txt") as f:
-    treasury_addr = f.read().strip()
+@st.cache_resource
+def get_contract():
+    w3 = Web3(Web3.HTTPProvider(RPC_URL))
+    artifact_path = "contracts/AgentEscrowV3_abi.json" if os.path.exists("contracts/AgentEscrowV3_abi.json") else "agentcourt/contracts/AgentEscrowV3_abi.json"
+    with open(artifact_path, "r") as f:
+        abi = json.load(f)
+    return w3, w3.eth.contract(address=ESCROW_ADDRESS, abi=abi)
 
-# Sidebar Setup
-st.sidebar.header("🌐 Protocol Infrastructure")
-st.sidebar.code(
-    f"Network  : Base Mainnet (8453)\n"
-    f"Contract : {agent.ESCROW_ADDRESS}\n"
-    f"Token    : USDC (0x8335...2913)\n"
-    f"Treasury : {treasury_addr}\n"
-    f"Fee Rate : 1.5% (150 bps)"
-)
+w3, contract = get_contract()
 
-st.sidebar.markdown("---")
-st.sidebar.header("🤖 Active AI Juror Panel")
-st.sidebar.success("🟢 **Juror 1:** Anthropic (Claude Opus)")
-st.sidebar.success("🟢 **Juror 2:** OpenAI (GPT-4o Mini)")
-st.sidebar.success("🟢 **Juror 3:** Google (Gemini 3.6 Flash)")
-st.sidebar.caption("Consensus Engine: 2-of-3 Quorum + Vector Stare Decisis")
+st.title("⚖️ AgentCourt V3 — Autonomous Escrow & Arbitration")
+st.caption(f"Connected to Base Sepolia | Contract: `{ESCROW_ADDRESS}`")
 
-# Resilient Metric Queries
-treasury_usdc = 0.0
-contract_usdc = 0.0
-task_count = 0
-
+# 1. Fetch Task Counter
 try:
-    treasury_raw = agent.usdc_contract.functions.balanceOf(treasury_addr).call()
-    treasury_usdc = treasury_raw / 10**6
-except Exception:
-    treasury_usdc = 0.0
+    total_tasks = contract.functions.taskCounter().call()
+except Exception as e:
+    total_tasks = 0
+    st.error(f"Error connecting to contract: {e}")
 
-try:
-    contract_raw = agent.usdc_contract.functions.balanceOf(agent.ESCROW_ADDRESS).call()
-    contract_usdc = contract_raw / 10**6
-except Exception:
-    contract_usdc = 0.0
+court_signer = os.getenv("DEPLOYER_PUBLIC_KEY", "0x7807d927C720bdEE226AbaC41E0793326c5b62c6")
 
-try:
-    task_count = agent.escrow_contract.functions.taskCount().call()
-except Exception:
-    task_count = 0
+col1, col2, col3 = st.columns(3)
+col1.metric("Total Protocol Tasks", total_tasks)
+col2.metric("Court Signer", f"{court_signer[:6]}...{court_signer[-4:]}")
+col3.metric("Network Status", "Base Sepolia (Live)")
 
-precedents = precedent_db.get_all_precedents()
+st.divider()
+st.subheader("📋 Active Protocol Tasks")
 
-# Metric Cards
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("🏦 Cumulative Protocol Fees", f"${treasury_usdc:.4f} USDC")
-c2.metric("🔒 Escrow TVL", f"${contract_usdc:.4f} USDC")
-c3.metric("📋 Total Escrows Processed", str(task_count + 1 if task_count > 0 else 0))
-c4.metric("⚖️ Indexed Precedents", str(len(precedents)))
+if total_tasks == 0:
+    st.info("No tasks created yet on Base Sepolia.")
+else:
+    task_rows = []
+    current_time = int(time.time())
 
-st.markdown("---")
-
-tab1, tab2, tab3, tab4 = st.tabs([
-    "📜 On-Chain Tasks", 
-    "⚡ Protocol Activity & Telemetry", 
-    "📚 Stare Decisis Precedent Law",
-    "⚖️ Live 3-Juror Deliberation Bench"
-])
-
-with tab1:
-    st.subheader("Active & Settled Escrow Tasks on Base")
-    tasks_data = []
-    status_map = {0: "Created", 1: "Submitted", 2: "Resolved"}
-    for i in range(0, max(10, task_count + 1)):
+    for task_id in range(total_tasks, 0, -1):
         try:
-            t = agent.escrow_contract.functions.tasks(i).call()
-            if t[1] != "0x0000000000000000000000000000000000000000":
-                tasks_data.append({
-                    "Task ID": t[0],
-                    "Client": f"{t[1][:6]}...{t[1][-4:]}",
-                    "Worker": f"{t[2][:6]}...{t[2][-4:]}",
-                    "Amount": f"${t[3] / 10**6:.2f} USDC",
-                    "Details / Hash": t[4][:45] + "..." if len(t[4]) > 45 else t[4],
-                    "Status": status_map.get(t[6], "Unknown")
-                })
-        except Exception:
+            # struct: [id, client, contractor, amount, specURI, challengePeriod, status, proposedBps, proposedAt, rulingURI]
+            t = contract.functions.tasks(task_id).call()
+            status_code = t[6]
+            status_name, status_icon = STATUS_MAP.get(status_code, ("Unknown", "⚪"))
+            
+            challenge_remaining = "—"
+            if status_code == 4 and t[8] > 0:
+                remaining_sec = (t[8] + t[5]) - current_time
+                challenge_remaining = f"{max(0, remaining_sec // 60)} min left" if remaining_sec > 0 else "Expired (Ready to Settle)"
+
+            task_rows.append({
+                "Task ID": f"#{t[0]}",
+                "Status": f"{status_icon} {status_name}",
+                "Amount (ETH)": f"{Web3.from_wei(t[3], 'ether'):.4f}",
+                "Proposed Split": f"{t[7]/100}% Client / {100 - (t[7]/100)}% Contractor" if status_code == 4 else "—",
+                "Challenge Window": challenge_remaining,
+                "Client": f"{t[1][:6]}...{t[1][-4:]}",
+                "Contractor": f"{t[2][:6]}...{t[2][-4:]}",
+                "Spec URI": t[4]
+            })
+        except Exception as e:
             continue
-            
-    if tasks_data:
-        df = pd.DataFrame(tasks_data)
-        st.dataframe(df, use_container_width=True, hide_index=True)
-    else:
-        st.info("Listening for mainnet tasks.")
 
-with tab2:
-    st.subheader("Live Network Activity & Multi-LLM Telemetry")
-    col_a, col_b = st.columns(2)
-    with col_a:
-        st.markdown("#### Protocol Parameters")
-        st.write(f"- **RPC Health:** Connected (`{agent.w3.provider.endpoint_uri}`)")
-        st.write(f"- **Latest Base Block:** `#{agent.w3.eth.block_number}`")
-        st.write(f"- **Dispute Fee Cut:** `150 bps` (1.50% automatic treasury routing)")
-        st.write(f"- **Arbitration Engine:** 3-Juror Quorum (Claude + GPT + Gemini)")
-        st.write(f"- **Legal Precedent Vector DB:** ChromaDB Vector Embeddings")
-    with col_b:
-        st.markdown("#### Panel Quorum Rules")
-        st.info(
-            "• 3/3 Unanimous or 2/3 Majority required for binding execution.\n\n"
-            "• Quantitative scores (Spec Adherence & Code Quality) are averaged across independent evaluations.\n\n"
-            "• Stare Decisis forces consistency against historic on-chain rulings."
-        )
+    if task_rows:
+        df = pd.DataFrame(task_rows)
+        st.dataframe(df, use_container_width=True)
 
-with tab3:
-    st.subheader("Indexed Court Precedents (Stare Decisis)")
-    if precedents:
-        search_query = st.text_input("🔍 Search Precedents by Semantic Keyword (e.g. 'erc20', 'scraping', 'syntax'):")
-        filtered = precedents
-        if search_query:
-            filtered = [p for p in precedents if search_query.lower() in p.get('spec', '').lower() or search_query.lower() in p.get('opinion', '').lower()]
+st.divider()
+st.subheader("🔍 Case Law & Precedent Log")
+st.caption("Autonomous Jury deliberation history and on-chain rulings")
 
-        for p in reversed(filtered):
-            with st.expander(f"Case #{p.get('task_id')} | Split: {p.get('client_share_pct')}% Client / {p.get('worker_share_pct')}% Worker"):
-                st.markdown(f"**Task Specification:**\n`{p.get('spec')}`")
-                st.markdown(f"**Submitted Deliverable:**\n```python\n{p.get('deliverable')}\n```")
-                st.markdown(f"**Court Legal Opinion:**\n> {p.get('opinion')}")
-    else:
-        st.info("No precedents recorded yet.")
-
-with tab4:
-    st.subheader("⚖️ Test Live 3-Juror Multi-LLM Deliberation")
-    st.markdown("Enter a hypothetical task and worker deliverable to convene the 3-juror panel live:")
-
-    demo_spec = st.text_area(
-        "Task Specification:", 
-        value="Write a Python function using web3.py that fetches the current block number on Base Mainnet.",
-        height=70
-    )
-    demo_sub = st.text_area(
-        "Worker Deliverable Submission:", 
-        value="from web3 import Web3\ndef get_base_block():\n    w3 = Web3(Web3.HTTPProvider('https://mainnet.base.org'))\n    return w3.eth.block_number\nprint(get_base_block())",
-        height=120
-    )
-
-    if st.button("🔨 Convene Court & Arbitrate Dispute", type="primary"):
-        with st.spinner("Convening Claude Opus, GPT-4o Mini, and Gemini Flash for parallel deliberation..."):
-            ruling = arbitrator.arbitrate_task(demo_spec, demo_sub)
-            
-            st.success(f"⚖️ Consensus Decision: {ruling['provider']}")
-            
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Spec Adherence", f"{ruling['spec_adherence']}/100")
-            m2.metric("Code Quality", f"{ruling['code_quality']}/100")
-            m3.metric("Client Split", f"{ruling['client_share_pct']}%")
-            m4.metric("Worker Split", f"{ruling['worker_share_pct']}%")
-            
-            st.markdown("### 📜 Joint Court Opinion")
-            st.info(ruling["court_opinion"])
-            
-            if "panel_breakdown" in ruling:
-                st.markdown("### 🗳️ Individual Juror Ballots")
-                cols = st.columns(len(ruling["panel_breakdown"]))
-                for idx, juror_data in enumerate(ruling["panel_breakdown"]):
-                    with cols[idx]:
-                        st.markdown(f"**{juror_data['juror']}**")
-                        st.write(f"• Award: `{juror_data['worker_share_pct']}% Worker / {juror_data['client_share_pct']}% Client`")
-                        st.write(f"• Spec: `{juror_data['spec_adherence']}/100` | Code: `{juror_data['code_quality']}/100`")
-                        st.caption(juror_data['court_opinion'])
+st.markdown("""
+* **Task #14:** 60% Client / 40% Contractor | *Status: ⚖️ Ruling Proposed* | [View BaseScan TX](https://sepolia.basescan.org/tx/0x627f7cde17bfdc724090c1cac56f35e79c36adb2f927e0a5b977e4e257f35484)
+* **Contract:** Verified Source Code | [View on BaseScan](https://sepolia.basescan.org/address/0x4a1629907Aa583E0f24EA66929f3D38410c66cf2#code)
+""")
