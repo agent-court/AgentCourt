@@ -11,12 +11,10 @@ class AgentCourtClient:
         self.account = self.w3.eth.account.from_key(private_key)
         self.contract_address = Web3.to_checksum_address(contract_address)
         
-        abi_path = os.path.join(os.path.dirname(__file__), "abi.json")
-        if not os.path.exists(abi_path):
-            abi_path = "contracts/AgentEscrowV3_abi.json" if os.path.exists("contracts/AgentEscrowV3_abi.json") else "agentcourt/contracts/AgentEscrowV3_abi.json"
-        
+        abi_path = "agentcourt/contracts/AgentEscrowV3_abi.json"
         with open(abi_path, "r") as f:
-            abi = json.load(f)
+            abi_data = json.load(f)
+            abi = abi_data.get("abi", abi_data) if isinstance(abi_data, dict) else abi_data
             
         self.contract = self.w3.eth.contract(address=self.contract_address, abi=abi)
 
@@ -36,19 +34,21 @@ class AgentCourtClient:
         receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
         return receipt.transactionHash.hex()
 
-    def create_task(self, contractor: str, spec_uri: str, amount_eth: float, challenge_period: int = 3600) -> str:
-        """Lock funds into escrow for a specific contractor task."""
+    def create_task(self, contractor: str, spec_uri: str, amount_eth: float, challenge_period: int = 300) -> tuple:
+        """Lock funds into escrow and return (tx_hash, task_id)."""
         value_wei = self.w3.to_wei(amount_eth, 'ether')
         func = self.contract.functions.createTask(
             Web3.to_checksum_address(contractor),
             spec_uri,
             challenge_period
         )
-        return self._send_tx(func, value_wei=value_wei)
+        tx_hash = self._send_tx(func, value_wei=value_wei)
+        task_id = self.contract.functions.taskCounter().call()
+        return tx_hash, task_id
 
-    def submit_work(self, task_id: int) -> str:
-        """Contractor marks the task as completed/submitted."""
-        func = self.contract.functions.submitWork(task_id)
+    def complete_task(self, task_id: int) -> str:
+        """Client approves and releases full payment to contractor."""
+        func = self.contract.functions.completeTask(task_id)
         return self._send_tx(func)
 
     def raise_dispute(self, task_id: int) -> str:
@@ -57,7 +57,7 @@ class AgentCourtClient:
         return self._send_tx(func)
 
     def get_task(self, task_id: int) -> dict:
-        """Fetch task details and current status from on-chain."""
+        """Fetch task details and status from on-chain."""
         t = self.contract.functions.tasks(task_id).call()
         return {
             "id": t[0],
