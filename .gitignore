@@ -5,3 +5,4 @@ __pycache__/
 *.pyc
 chroma_court_db/
 node_modules/
+chroma_db/
