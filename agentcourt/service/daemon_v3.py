@@ -5,6 +5,7 @@ import logging
 from web3 import Web3
 from eth_account import Account
 from agentcourt.service.precedent_engine import CaseLawEngine
+from agentcourt.service.jury_deliberation import AgentJuryEngine
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -20,6 +21,7 @@ class AgentCourtDaemon:
         self.private_key = private_key
         self.account = Account.from_key(private_key) if private_key else None
         self.engine = CaseLawEngine()
+        self.jury = AgentJuryEngine()
 
         artifact_path = "contracts/AgentEscrowV3_abi.json" if os.path.exists("contracts/AgentEscrowV3_abi.json") else "agentcourt/contracts/AgentEscrowV3_abi.json"
         with open(artifact_path, "r") as f:
@@ -60,23 +62,21 @@ class AgentCourtDaemon:
         return receipt
 
     def handle_dispute(self, task_id: int, reason: str):
-        logging.info(f"⚖️ Handling Dispute for Task #{task_id}...")
-        
         task_data = self.contract.functions.tasks(task_id).call()
         spec_uri = task_data[4] if len(task_data) > 4 else "ipfs://spec"
 
         task_brief = f"Task #{task_id} Spec: {spec_uri}. Dispute Reason: {reason}"
-        logging.info(f"🔍 Consulting Precedent Base...")
+        precedents = []
         if hasattr(self.engine, "search_precedents"):
             try:
-                self.engine.search_precedents(task_brief, n_results=3)
+                precedents = self.engine.search_precedents(task_brief, n_results=3)
             except Exception as e:
                 logging.warning(f"Precedent engine notice: {e}")
 
-        client_bps = 5000
-        ruling_uri = f"ipfs://agentcourt-ruling-verdict-task-{task_id}-5050"
+        verdict = self.jury.evaluate_dispute(task_id, spec_uri, reason, precedents)
+        client_bps = verdict["client_bps"]
+        ruling_uri = f"ipfs://agentcourt-verdict-{task_id}-{client_bps}bps"
 
-        logging.info(f"🗳️ Autonomous Verdict: {client_bps} bps (50% Client / 50% Contractor)")
         self.propose_ruling_on_chain(task_id, client_bps, ruling_uri)
 
     def check_pending_executions(self):
@@ -85,12 +85,10 @@ class AgentCourtDaemon:
 
         for task_id in range(1, total_tasks + 1):
             task_data = self.contract.functions.tasks(task_id).call()
-            # struct: [id, client, contractor, amount, specURI, challengePeriod, status, proposedBps, proposedAt, rulingURI]
             status = task_data[6]
             challenge_period = task_data[5]
             proposed_at = task_data[8]
 
-            # Status 4 == RulingProposed
             if status == 4 and proposed_at > 0:
                 unlock_time = proposed_at + challenge_period
                 if current_time >= unlock_time:
@@ -102,7 +100,7 @@ class AgentCourtDaemon:
 
     def run(self):
         logging.info("========================================================")
-        logging.info("🚀 AGENTCOURT V3 FULL-LIFECYCLE DAEMON STARTED")
+        logging.info("🚀 AGENTCOURT V3 FULL-LIFECYCLE JURY DAEMON STARTED")
         logging.info(f"🌐 RPC          : {RPC_URL}")
         logging.info(f"🔒 Escrow V3    : {self.contract_address}")
         logging.info(f"🔑 Court Signer : {self.account.address if self.account else 'None'}")
@@ -110,14 +108,11 @@ class AgentCourtDaemon:
 
         current_block = self.w3.eth.block_number
         from_block = max(0, current_block - 200)
-
         processed_disputes = set()
 
         while True:
             try:
                 latest_block = self.w3.eth.block_number
-                
-                # 1. Listen for new disputes
                 events = self.contract.events.TaskDisputed.create_filter(
                     from_block=from_block,
                     to_block="latest"
@@ -138,10 +133,7 @@ class AgentCourtDaemon:
                             processed_disputes.add(task_id)
 
                 from_block = latest_block + 1
-
-                # 2. Check and auto-execute matured rulings
                 self.check_pending_executions()
-
                 time.sleep(POLL_INTERVAL)
             except KeyboardInterrupt:
                 logging.info("\n🛑 Daemon stopped.")
