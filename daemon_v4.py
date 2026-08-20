@@ -7,6 +7,8 @@ from typing import Dict, Any
 from dotenv import load_dotenv
 from web3 import AsyncWeb3, AsyncHTTPProvider
 
+from jurors import deliberate_job
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] [AgentCourt Daemon] %(message)s"
@@ -15,7 +17,6 @@ logger = logging.getLogger("AgentCourt")
 
 load_dotenv()
 
-# Use official Base Sepolia endpoint to avoid load balancer node desync
 HTTP_RPC_URL = os.getenv("RPC_URL", "https://sepolia.base.org")
 PRIVATE_KEY = os.getenv("PRIVATE_KEY") or os.getenv("ARBITRATOR_PRIVATE_KEY")
 CONTRACT_ADDRESS = os.getenv("AGENT_COURT_CONTRACT_ADDRESS") or os.getenv("AGENT_ESCROW_V4_ADDRESS")
@@ -78,10 +79,14 @@ class DisputeDaemon:
         logger.info(f"Deliverable Hash: 0x{deliverable_hash}")
 
         try:
-            logger.info(f"Deliberating Job #{job_id} with AgentCourt Jurors...")
-            worker_split_bps = 5000
-            ruling_opinion = "AgentCourt Consensus: Deliverable meets 50% task criteria."
+            logger.info(f"Deliberating Job #{job_id} with AgentCourt Multi-Model Jurors...")
+            
+            verdict = await deliberate_job(job_id, f"0x{deliverable_hash}")
+            worker_split_bps = verdict["consensus_bps"]
+            ruling_opinion = verdict["opinion"]
+            
             logger.info(f"Consensus reached: Worker Split = {worker_split_bps / 100}%")
+            logger.info(f"Ruling Summary: {ruling_opinion}")
 
             await self.submit_evaluation(job_id, worker_split_bps, ruling_opinion)
         except Exception as err:
@@ -116,15 +121,14 @@ class DisputeDaemon:
 
     async def run(self):
         await self.initialize()
-        # Look back 50 blocks on boot so we catch Job #1 if it's still waiting
         current_head = await self.w3.eth.block_number
-        latest_scanned_block = max(0, current_head - 50)
+        latest_scanned_block = max(0, current_head - 10)
         logger.info(f"Listening for JobSubmitted events from block {latest_scanned_block}...")
 
         while True:
             try:
                 head_block = await self.w3.eth.block_number
-                target_block = head_block - 1  # 1-block safety margin against RPC desync
+                target_block = head_block - 1
 
                 if target_block > latest_scanned_block:
                     events = await self.contract.events.JobSubmitted.get_logs(
