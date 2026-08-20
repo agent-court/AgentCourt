@@ -6,6 +6,8 @@ import logging
 from typing import Dict, Any, List
 import statistics
 
+from resolver import resolve_payload
+
 logger = logging.getLogger("AgentCourt.Jurors")
 
 
@@ -18,24 +20,37 @@ def parse_json_safely(raw_text: str) -> Dict[str, Any]:
     return json.loads(cleaned)
 
 
+def build_evaluation_prompt(job_id: int, payload: Dict[str, Any]) -> str:
+    task_spec = payload.get("task_specification", "No specification provided.")
+    deliverable = payload.get("deliverable_content", "No content provided.")
+    criteria = payload.get("criteria", "Evaluate completeness and adherence to requirements.")
+
+    return (
+        f"You are a neutral decentralized court juror presiding over an on-chain escrow dispute in AgentCourt.\n\n"
+        f"--- TASK SPECIFICATION ---\n"
+        f"{task_spec}\n\n"
+        f"--- DELIVERABLE SUBMITTED BY WORKER ---\n"
+        f"{deliverable}\n\n"
+        f"--- EVALUATION CRITERIA ---\n"
+        f"{criteria}\n\n"
+        f"--- INSTRUCTIONS ---\n"
+        f"Assess how well the deliverable satisfies the task specification.\n"
+        f"Assign a worker payout percentage expressed in basis points (0 to 10000 bps, where 10000 = 100% full payout, 5000 = 50% split, 0 = 0% full refund to client).\n"
+        f"Provide concise reasoning (1-2 sentences max).\n\n"
+        f"Respond ONLY with a raw JSON object formatted as:\n"
+        f'{{"worker_bps": <integer 0-10000>, "reasoning": "<your concise justification>"}}'
+    )
+
+
 # 1. OpenAI Juror (gpt-4o)
-async def call_openai_juror(job_details: Dict[str, Any]) -> Dict[str, Any]:
+async def call_openai_juror(prompt: str) -> Dict[str, Any]:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        logger.warning("OPENAI_API_KEY missing.")
         return {"model": "gpt-4o", "worker_bps": 5000, "reasoning": "Fallback: Key missing."}
     
     try:
         from openai import AsyncOpenAI
         client = AsyncOpenAI(api_key=api_key)
-        prompt = (
-            f"You are a neutral decentralized court juror in AgentCourt.\n"
-            f"Evaluate this task deliverable submission:\n"
-            f"Job ID: {job_details.get('job_id')}\n"
-            f"Deliverable Hash: {job_details.get('deliverable_hash')}\n\n"
-            f"Respond ONLY with a JSON object:\n"
-            f'{{"worker_bps": <integer between 0 and 10000>, "reasoning": "<concise justification>"}}'
-        )
         response = await client.chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
@@ -54,31 +69,20 @@ async def call_openai_juror(job_details: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # 2. Anthropic Juror (claude-haiku-4-5-20251001)
-async def call_anthropic_juror(job_details: Dict[str, Any]) -> Dict[str, Any]:
+async def call_anthropic_juror(prompt: str) -> Dict[str, Any]:
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
-        logger.warning("ANTHROPIC_API_KEY missing.")
-        return {"model": "claude", "worker_bps": 5000, "reasoning": "Fallback: Key missing."}
+        return {"model": "claude-haiku-4-5", "worker_bps": 5000, "reasoning": "Fallback: Key missing."}
     
     try:
         from anthropic import AsyncAnthropic
         client = AsyncAnthropic(api_key=api_key)
-        prompt = (
-            f"You are a neutral decentralized court juror in AgentCourt.\n"
-            f"Evaluate this task deliverable submission:\n"
-            f"Job ID: {job_details.get('job_id')}\n"
-            f"Deliverable Hash: {job_details.get('deliverable_hash')}\n\n"
-            f"Respond ONLY with a raw JSON object:\n"
-            f'{{"worker_bps": <integer between 0 and 10000>, "reasoning": "<concise justification>"}}'
-        )
-        
         response = await client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=256,
             temperature=0.2,
             messages=[{"role": "user", "content": prompt}]
         )
-        
         raw_text = ""
         for block in response.content:
             if hasattr(block, "text"):
@@ -98,24 +102,14 @@ async def call_anthropic_juror(job_details: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # 3. Google Gemini Juror (gemini-3.6-flash)
-async def call_gemini_juror(job_details: Dict[str, Any]) -> Dict[str, Any]:
+async def call_gemini_juror(prompt: str) -> Dict[str, Any]:
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
-        logger.warning("GEMINI_API_KEY missing.")
-        return {"model": "gemini", "worker_bps": 5000, "reasoning": "Fallback: Key missing."}
+        return {"model": "gemini-3.6-flash", "worker_bps": 5000, "reasoning": "Fallback: Key missing."}
     
     try:
         from google import genai
         client = genai.Client(api_key=api_key)
-        prompt = (
-            f"You are a neutral decentralized court juror in AgentCourt.\n"
-            f"Evaluate this task deliverable submission:\n"
-            f"Job ID: {job_details.get('job_id')}\n"
-            f"Deliverable Hash: {job_details.get('deliverable_hash')}\n\n"
-            f"Respond ONLY with a raw JSON object:\n"
-            f'{{"worker_bps": <integer between 0 and 10000>, "reasoning": "<concise justification>"}}'
-        )
-        
         loop = asyncio.get_running_loop()
         response = await loop.run_in_executor(
             None,
@@ -137,13 +131,16 @@ async def call_gemini_juror(job_details: Dict[str, Any]) -> Dict[str, Any]:
 
 # Aggregator
 async def deliberate_job(job_id: int, deliverable_hash: str) -> Dict[str, Any]:
-    job_details = {"job_id": job_id, "deliverable_hash": deliverable_hash}
-    logger.info(f"Dispatching Job #{job_id} to 3-juror quorum...")
+    logger.info(f"Resolving metadata for Job #{job_id} ({deliverable_hash[:10]}...)...")
+    payload = await resolve_payload(deliverable_hash)
+    
+    prompt = build_evaluation_prompt(job_id, payload)
+    logger.info(f"Dispatching Job #{job_id} with resolved spec to 3-juror quorum...")
 
     results: List[Dict[str, Any]] = await asyncio.gather(
-        call_openai_juror(job_details),
-        call_anthropic_juror(job_details),
-        call_gemini_juror(job_details)
+        call_openai_juror(prompt),
+        call_anthropic_juror(prompt),
+        call_gemini_juror(prompt)
     )
 
     votes = [r["worker_bps"] for r in results]
@@ -158,4 +155,3 @@ async def deliberate_job(job_id: int, deliverable_hash: str) -> Dict[str, Any]:
         "opinion": opinion_summary[:500],
         "juror_breakdown": results
     }
-
