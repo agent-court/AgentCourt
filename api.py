@@ -1,3 +1,4 @@
+from content_store import get_spec_by_hash, get_deliverable_by_hash
 import os
 import json
 import asyncio
@@ -105,7 +106,16 @@ async def run_autonomous_settlement(job_id: int, deliverable_hash: str):
     try:
         await manager.broadcast({"type": "DELIBERATION_STARTED", "job_id": job_id})
         
-        verdict = await deliberate_job(job_id, deliverable_hash)
+        raw_deliv = get_deliverable_by_hash(deliverable_hash)
+        try:
+            job_data = contract.functions.jobs(job_id).call()
+            spec_hex = job_data[7].hex() if hasattr(job_data[7], "hex") else str(job_data[7])
+            raw_spec = get_spec_by_hash(spec_hex)
+        except Exception:
+            raw_spec = None
+        
+        logging.info(f"[AgentCourt.API] Resolved content for #{job_id} -> Spec: {bool(raw_spec)} | Code: {bool(raw_deliv)}")
+        verdict = await deliberate_job(job_id, deliverable_hash, task_spec=raw_spec, deliverable_text=raw_deliv)
         
         await manager.broadcast({
             "type": "CONSENSUS_REACHED",

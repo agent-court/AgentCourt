@@ -46,7 +46,7 @@ async def query_gpt4o(task_spec: str, deliverable: str, precedents_context: str)
 async def query_juror_2(task_spec: str, deliverable: str, precedents_context: str) -> dict:
     prompt = PROMPT_TEMPLATE.format(precedents_context=precedents_context, spec=task_spec, deliv=deliverable)
     # 1. Try Anthropic
-    for model_name in ["claude-3-5-sonnet-latest", "claude-3-haiku-20240307", "claude-3-sonnet-20240229"]:
+    for model_name in ["claude-3-5-sonnet-20241022", "claude-3-haiku-20240307", "claude-3-sonnet-20240229"]:
         try:
             res = await anthropic_client.messages.create(
                 model=model_name,
@@ -77,7 +77,7 @@ async def query_juror_2(task_spec: str, deliverable: str, precedents_context: st
 async def query_juror_3(task_spec: str, deliverable: str, precedents_context: str) -> dict:
     prompt = PROMPT_TEMPLATE.format(precedents_context=precedents_context, spec=task_spec, deliv=deliverable)
     # 1. Try Gemini models
-    for gemini_model in ["gemini-2.5-flash", "gemini-1.5-flash-latest", "gemini-1.5-pro-latest"]:
+    for gemini_model in ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro-latest"]:
         try:
             res = gemini_client.models.generate_content(
                 model=gemini_model,

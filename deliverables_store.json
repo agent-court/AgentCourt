@@ -1,8 +1,11 @@
 {
   "specs": {
-    "a0f4e9b03e2c4dd604ca3142d10887a2c59e3523c3cab5c6797024a5bd80b884": "Implement a complete self-balancing AVL binary search tree in Python with insert, delete, and rebalance methods."
+    "a0f4e9b03e2c4dd604ca3142d10887a2c59e3523c3cab5c6797024a5bd80b884": "Implement a complete self-balancing AVL binary search tree in Python with insert, delete, and rebalance methods.",
+    "916e3b1393f0af0bfc04a5da6ece93043bf6a4a296eea1f4e624b18c131f19eb": "Build a production-ready LRU Cache class in Python with get(key) and put(key, value) in O(1) time complexity."
   },
   "deliverables": {
-    "d8ef599fca6a33380ce61ef42c5f3bf8885460a11b74ee6b4ff0fc88313af24b": "def avl_tree():\n    pass  # Stub only, no actual implementation"
+    "d8ef599fca6a33380ce61ef42c5f3bf8885460a11b74ee6b4ff0fc88313af24b": "def avl_tree():\n    pass  # Stub only, no actual implementation",
+    "681fc96b610f7915ba7eec6c94eb04eae327652b50995ee36de29cec13dff456": "class LRUCache:\n    def __init__(self, capacity: int):\n        pass\n    def get(self, key: int) -> int:\n        return -1\n    def put(self, key: int, value: int) -> None:\n        pass  # Unimplemented stub",
+    "c5e14ee0f752c9e80b1686e0e7957b4e0030dc3e2e158303ff6ffb7c26d4376d": "class LRUCache:\n    def __init__(self, capacity: int):\n        pass\n    def get(self, key: int) -> int:\n        return -1\n    def put(self, key: int, value: int) -> None:\n        pass  # Stub only, no logic"
   }
 }
