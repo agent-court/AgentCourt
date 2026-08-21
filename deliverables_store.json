@@ -1,0 +1,8 @@
+{
+  "specs": {
+    "a0f4e9b03e2c4dd604ca3142d10887a2c59e3523c3cab5c6797024a5bd80b884": "Implement a complete self-balancing AVL binary search tree in Python with insert, delete, and rebalance methods."
+  },
+  "deliverables": {
+    "d8ef599fca6a33380ce61ef42c5f3bf8885460a11b74ee6b4ff0fc88313af24b": "def avl_tree():\n    pass  # Stub only, no actual implementation"
+  }
+}
