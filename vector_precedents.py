@@ -50,3 +50,19 @@ def find_relevant_precedents(task_spec: str, deliverable_evidence: str, top_k: i
             precedents.append(meta)
             
     return precedents
+
+
+def format_precedents_for_prompt(precedents: List[Dict[str, Any]]) -> str:
+    if not precedents:
+        return "No prior case precedents found. Rely strictly on standard evaluation."
+    
+    formatted = "### LEGAL PRECEDENTS & PRIOR COURT RULINGS (STARE DECISIS):\n"
+    for idx, p in enumerate(precedents, 1):
+        formatted += (
+            f"Precedent Case #{idx} (Case ID: {p.get("case_id")}):\n"
+            f"  - Title / Spec: {p.get("title", "N/A")}\n"
+            f"  - Prior Ruling Award: {p.get("ruling_basis_points")} bps\n"
+            f"  - Case Facts / Rationale: {p.get("fact_summary", "N/A")}\n\n"
+        )
+    formatted += "Consider these precedents to maintain consistent judicial standards.\n"
+    return formatted
