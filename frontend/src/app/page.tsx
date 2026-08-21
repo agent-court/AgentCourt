@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { Shield, Activity, Scale, CheckCircle2, Clock, Terminal, AlertTriangle } from 'lucide-react';
 import { CreateJobModal } from '@/components/CreateJobModal';
+import CaseDetailModal from '@/components/CaseDetailModal';
 
 interface Job {
   job_id: number;
@@ -34,6 +35,7 @@ export default function Dashboard() {
   const [events, setEvents] = useState<WsEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [wsConnected, setWsConnected] = useState(false);
+  const [selectedCaseId, setSelectedCaseId] = useState<number | null>(null);
 
   const fetchJobs = async () => {
     try {
@@ -126,7 +128,9 @@ export default function Dashboard() {
           ) : (
             <div className="grid gap-4">
               {jobs.map((job) => (
-                <div key={job.job_id} className="p-5 rounded-xl border border-slate-800 bg-slate-900/40 hover:border-slate-700 transition">
+                <div key={job.job_id}
+                onClick={() => setSelectedCaseId(job.job_id)}
+                style={{ cursor: 'pointer' }} className="p-5 rounded-xl border border-slate-800 bg-slate-900/40 hover:border-slate-700 transition">
                   <div className="flex items-center justify-between mb-3">
                     <span className="text-sm font-bold text-white">Escrow Case #{job.job_id}</span>
                     {getStatusBadge(job.status)}
@@ -180,7 +184,8 @@ export default function Dashboard() {
             )}
           </div>
         </div>
-      </main>
+        <CaseDetailModal jobId={selectedCaseId} onClose={() => setSelectedCaseId(null)} />
+    </main>
     </div>
   );
 }

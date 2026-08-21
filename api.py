@@ -1,3 +1,5 @@
+from vector_precedents import get_precedent_collection
+from rpc_provider import get_resilient_w3
 from content_store import get_spec_by_hash, get_deliverable_by_hash
 import os
 import json
@@ -26,7 +28,7 @@ RPC_URL = os.getenv("RPC_URL", "https://base-sepolia-rpc.publicnode.com")
 PRIVATE_KEY = os.getenv("PRIVATE_KEY") or os.getenv("ARBITRATOR_PRIVATE_KEY")
 CONTRACT_ADDRESS = os.getenv("AGENT_COURT_CONTRACT_ADDRESS") or os.getenv("AGENT_ESCROW_V4_ADDRESS")
 
-w3 = Web3(Web3.HTTPProvider(RPC_URL))
+w3 = get_resilient_w3()
 account = w3.eth.account.from_key(PRIVATE_KEY) if PRIVATE_KEY else None
 
 with open("AgentEscrowV4.json", "r") as f:
@@ -268,3 +270,47 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(websocket)
+
+@app.get("/cases/{job_id}")
+async def get_case_details(job_id: int):
+    try:
+        job = contract.functions.jobs(job_id).call()
+        spec_hex = job[6].hex() if hasattr(job[6], "hex") else str(job[6])
+        deliv_hex = job[7].hex() if hasattr(job[7], "hex") else str(job[7])
+        
+        raw_spec = get_spec_by_hash(spec_hex) or "No raw specification registered."
+        raw_deliv = get_deliverable_by_hash(deliv_hex) or "No raw deliverable code registered."
+        
+        precedent_data = None
+        try:
+            col = get_precedent_collection()
+            res = col.get(ids=[str(job_id)])
+            if res and res.get("documents") and len(res["documents"]) > 0:
+                precedent_data = {
+                    "document": res["documents"][0],
+                    "metadata": res["metadatas"][0] if res.get("metadatas") else {}
+                }
+        except Exception as pe:
+            logging.warning(f"Failed to fetch precedent for {job_id}: {pe}")
+            
+        state_map = {0: "Created", 1: "Funded", 2: "Submitted", 3: "Settled", 4: "Refunded"}
+        
+        return {
+            "job_id": job_id,
+            "client": job[1],
+            "provider": job[2],
+            "amount_wei": str(job[3]),
+            "deadline": job[4],
+            "state_code": job[8],
+            "state": state_map.get(job[8], "Unknown"),
+            "worker_bps": job[9],
+            "client_bps": 10000 - job[9] if job[8] == 3 else 0,
+            "spec_hash": "0x" + spec_hex.replace("0x", ""),
+            "deliverable_hash": "0x" + deliv_hex.replace("0x", ""),
+            "raw_spec": raw_spec,
+            "raw_deliverable": raw_deliv,
+            "precedent": precedent_data
+        }
+    except Exception as e:
+        logging.error(f"Error fetching case {job_id}: {e}")
+        return {"error": str(e)}
