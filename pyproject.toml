@@ -4,27 +4,27 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentcourt"
-version = "0.1.0"
+version = "0.4.0"
 authors = [
-  { name = "Polybius Labs", email = "contact@polybiuslabs.xyz" },
+  { name = "AgentCourt Core Team" }
 ]
-description = "Trust-minimized multi-agent neural dispute arbitration protocol on Base."
+description = "Multi-agent synthetic arbitration and escrow protocol client for autonomous AI commerce."
 readme = "README.md"
-license = { text = "MIT" }
 requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
 dependencies = [
     "web3>=6.0.0",
     "chromadb>=0.4.0",
-    "onnxruntime",
     "openai>=1.0.0",
     "anthropic>=0.18.0",
-    "google-generativeai",
-    "python-dotenv"
+    "python-dotenv>=1.0.0",
+    "certifi>=2024.0.0"
 ]
 
 [tool.setuptools.packages.find]
+where = ["."]
 include = ["agentcourt*"]
-exclude = ["node_modules*", "cache*", "artifacts*", "contracts*", "sdk*", "chroma_db*", "agentcourt_db*"]
-
-[tool.setuptools.package-data]
-agentcourt = ["*.json"]

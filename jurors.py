@@ -1,161 +1,120 @@
 import os
 import json
 import asyncio
-import logging
-from typing import Dict, Any, List
-import statistics
-
+from dotenv import load_dotenv
 from openai import AsyncOpenAI
 from anthropic import AsyncAnthropic
-import google.generativeai as genai
-from dotenv import load_dotenv
-
-from resolver import resolve_payload
+from google import genai
+from google.genai import types
 
 load_dotenv()
-logger = logging.getLogger("AgentCourt.Jurors")
 
-# Initialize AI Clients
-openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY")) if os.getenv("OPENAI_API_KEY") else None
-anthropic_client = AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY")) if os.getenv("ANTHROPIC_API_KEY") else None
+openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+anthropic_client = AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
-if os.getenv("GEMINI_API_KEY"):
-    genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-
-
-SYSTEM_PROMPT = """You are an impartial, highly rigorous AI juror in the decentralized dispute protocol 'AgentCourt'.
-Your duty is to evaluate a completed deliverable against the initial task specification and evaluation criteria.
-
-You must return ONLY a valid JSON object with the following schema:
-{
-  "basis_points": <integer between 0 and 10000>,
-  "reasoning": "<concise justification in 2-3 sentences>",
-  "confidence": <float between 0.0 and 1.0>
-}
-- 10000 basis points = 100% of escrow released to provider (flawless execution).
-- 0 basis points = 0% released (complete default / failure).
-- Do NOT wrap your output in markdown code blocks. Output raw JSON only.
-"""
-
-
-def build_evaluation_prompt(job_id: int, metadata: Dict[str, Any]) -> str:
-    return f"""Case ID: Job #{job_id}
+PROMPT_TEMPLATE = """You are an impartial AI juror in a decentralized escrow dispute protocol (AgentCourt).
 Task Specification:
-{metadata.get('task_specification', 'N/A')}
+{spec}
 
-Delivered Work / Evidence:
-{metadata.get('deliverable_content', 'N/A')}
+Delivered Work:
+{deliv}
 
-Evaluation Criteria:
-{metadata.get('criteria', 'Standard quality and adherence to specs.')}
-"""
+Evaluate if the deliverable satisfies the task requirements.
+Respond strictly in valid JSON format:
+{{
+  "basis_points": <integer from 0 to 10000>,
+  "confidence": <float between 0.0 and 1.0>,
+  "reasoning": "<concise 1-2 sentence justification>"
+}}"""
 
-
-async def evaluate_gpt4o(prompt: str) -> Dict[str, Any]:
-    if not openai_client:
-        return {"juror": "GPT-4o", "basis_points": 8500, "reasoning": "Fallback vote: OpenAI key missing.", "confidence": 0.8}
-    try:
-        response = await openai_client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.1
-        )
-        content = response.choices[0].message.content.strip().replace("```json", "").replace("```", "")
-        data = json.loads(content)
-        data["juror"] = "GPT-4o"
-        return data
-    except Exception as e:
-        logger.warning(f"GPT-4o juror error: {e}")
-        return {"juror": "GPT-4o", "basis_points": 8000, "reasoning": f"Parsing fallback: {e}", "confidence": 0.5}
-
-
-async def evaluate_claude(prompt: str) -> Dict[str, Any]:
-    if not anthropic_client:
-        return {"juror": "Claude-Haiku", "basis_points": 8500, "reasoning": "Fallback vote: Anthropic key missing.", "confidence": 0.8}
-    try:
-        response = await anthropic_client.messages.create(
-            model="claude-3-5-haiku-latest",
-            max_tokens=400,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.1
-        )
-        content = response.content[0].text.strip().replace("```json", "").replace("```", "")
-        data = json.loads(content)
-        data["juror"] = "Claude-Haiku"
-        return data
-    except Exception as e:
-        logger.warning(f"Claude juror error: {e}")
-        return {"juror": "Claude-Haiku", "basis_points": 8000, "reasoning": f"Parsing fallback: {e}", "confidence": 0.5}
-
-
-async def evaluate_gemini(prompt: str) -> Dict[str, Any]:
-    if not os.getenv("GEMINI_API_KEY"):
-        return {"juror": "Gemini-Flash", "basis_points": 8500, "reasoning": "Fallback vote: Gemini key missing.", "confidence": 0.8}
-    try:
-        model = genai.GenerativeModel(
-            model_name="gemini-1.5-flash",
-            system_instruction=SYSTEM_PROMPT
-        )
-        response = await asyncio.to_thread(model.generate_content, prompt)
-        content = response.text.strip().replace("```json", "").replace("```", "")
-        data = json.loads(content)
-        data["juror"] = "Gemini-Flash"
-        return data
-    except Exception as e:
-        logger.warning(f"Gemini juror error: {e}")
-        return {"juror": "Gemini-Flash", "basis_points": 8000, "reasoning": f"Parsing fallback: {e}", "confidence": 0.5}
-
-
-def apply_consensus_with_outlier_rejection(votes: List[Dict[str, Any]], outlier_threshold_bps: int = 2000) -> Dict[str, Any]:
-    """
-    Computes median BPS and discards any juror whose vote deviates
-    from the raw median by more than outlier_threshold_bps.
-    """
-    valid_bps = [max(0, min(10000, int(v.get("basis_points", 5000)))) for v in votes]
-    initial_median = int(statistics.median(valid_bps))
-
-    filtered_votes = []
-    dropped_votes = []
-
-    for v, bps in zip(votes, valid_bps):
-        if abs(bps - initial_median) > outlier_threshold_bps and len(valid_bps) > 2:
-            dropped_votes.append({"juror": v.get("juror"), "basis_points": bps, "deviation": abs(bps - initial_median)})
-        else:
-            filtered_votes.append(v)
-
-    # Re-calculate final consensus on clean votes
-    clean_bps = [max(0, min(10000, int(v.get("basis_points", 5000)))) for v in filtered_votes]
-    final_consensus_bps = int(statistics.median(clean_bps)) if clean_bps else initial_median
-
-    opinions = [f"{v['juror']}: {v.get('basis_points')} bps ({v.get('reasoning', '')})" for v in filtered_votes]
-    combined_opinion = " | ".join(opinions)[:280]
-
-    return {
-        "consensus_bps": final_consensus_bps,
-        "raw_median_bps": initial_median,
-        "opinion": combined_opinion,
-        "juror_breakdown": votes,
-        "outliers_dropped": dropped_votes
-    }
-
-
-async def deliberate_job(job_id: int, deliverable_hash: str) -> Dict[str, Any]:
-    logger.info(f"Deliberating Job #{job_id} across multi-LLM jury...")
-    metadata = await resolve_payload(deliverable_hash)
-    prompt = build_evaluation_prompt(job_id, metadata)
-
-    # Run jurors in parallel
-    votes = await asyncio.gather(
-        evaluate_gpt4o(prompt),
-        evaluate_claude(prompt),
-        evaluate_gemini(prompt),
-        return_exceptions=False
+async def query_gpt4o(task_spec: str, deliverable: str) -> dict:
+    prompt = PROMPT_TEMPLATE.format(spec=task_spec, deliv=deliverable)
+    res = await openai_client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": prompt}],
+        response_format={"type": "json_object"}
     )
+    data = json.loads(res.choices[0].message.content)
+    data["juror"] = "GPT-4o"
+    return data
 
-    result = apply_consensus_with_outlier_rejection(votes, outlier_threshold_bps=2000)
-    logger.info(f"Consensus reached for Job #{job_id}: {result['consensus_bps']} bps (Outliers dropped: {len(result['outliers_dropped'])})")
-    return result
+async def query_juror_2(task_spec: str, deliverable: str) -> dict:
+    prompt = PROMPT_TEMPLATE.format(spec=task_spec, deliv=deliverable)
+    # 1. Try Anthropic
+    for model_name in ["claude-3-5-sonnet-latest", "claude-3-haiku-20240307", "claude-3-sonnet-20240229"]:
+        try:
+            res = await anthropic_client.messages.create(
+                model=model_name,
+                max_tokens=300,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            text = res.content[0].text.strip()
+            if "```json" in text:
+                text = text.split("```json")[1].split("```")[0].strip()
+            elif "```" in text:
+                text = text.split("```")[1].split("```")[0].strip()
+            data = json.loads(text)
+            data["juror"] = "Claude"
+            return data
+        except Exception:
+            continue
+            
+    # 2. Fallback to GPT-4o-mini as Juror 2 if Anthropic unavailable
+    res = await openai_client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}],
+        response_format={"type": "json_object"}
+    )
+    data = json.loads(res.choices[0].message.content)
+    data["juror"] = "GPT-4o-Mini (Alt-Juror)"
+    return data
+
+async def query_juror_3(task_spec: str, deliverable: str) -> dict:
+    prompt = PROMPT_TEMPLATE.format(spec=task_spec, deliv=deliverable)
+    # 1. Try Gemini models with fallback
+    for gemini_model in ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-flash", "gemini-3.6-flash"]:
+        try:
+            res = gemini_client.models.generate_content(
+                model=gemini_model,
+                contents=prompt,
+                config=types.GenerateContentConfig(response_mime_type="application/json")
+            )
+            data = json.loads(res.text)
+            data["juror"] = f"Gemini ({gemini_model})"
+            return data
+        except Exception:
+            continue
+            
+    # 2. Fallback to o3-mini or GPT-4o-mini
+    res = await openai_client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}],
+        response_format={"type": "json_object"}
+    )
+    data = json.loads(res.choices[0].message.content)
+    data["juror"] = "OpenAI-Mini (Alt-Juror)"
+    return data
+
+async def deliberate_job(job_id: int, deliverable_hash: str, task_spec: str = None, deliverable_text: str = None) -> dict:
+    spec = task_spec or f"Job #{job_id} task agreement on Base Sepolia."
+    deliv = deliverable_text or f"Deliverable Hash submitted on-chain: {deliverable_hash}"
+    
+    results = await asyncio.gather(
+        query_gpt4o(spec, deliv),
+        query_juror_2(spec, deliv),
+        query_juror_3(spec, deliv),
+        return_exceptions=True
+    )
+    
+    valid_jurors = [r for r in results if isinstance(r, dict)]
+    bps_list = [r["basis_points"] for r in valid_jurors]
+    consensus_bps = int(sorted(bps_list)[len(bps_list) // 2]) if bps_list else 0
+    opinions = " | ".join([f"{j['juror']}: {j['basis_points']} bps ({j['reasoning']})" for j in valid_jurors])
+    
+    return {
+        "consensus_bps": consensus_bps,
+        "opinion": opinions,
+        "juror_breakdown": valid_jurors,
+        "outliers_dropped": []
+    }

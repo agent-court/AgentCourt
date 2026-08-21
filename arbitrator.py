@@ -1,195 +1,120 @@
-import json
 import os
+import json
 import re
-import warnings
+from typing import Dict, Any, List
 from dotenv import load_dotenv
-import precedent_db
 
-# Suppress SDK warnings
-warnings.filterwarnings("ignore")
+from .vector_precedents import find_relevant_precedents
 
-# AI Juror SDKs
-import anthropic
-from openai import OpenAI
-from google import genai
+load_dotenv()
 
-load_dotenv(override=True)
-
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 
-def _clean_json_response(raw_text: str) -> dict:
-    """Extracts and parses JSON from raw LLM responses."""
-    text = raw_text.strip()
-    match = re.search(r"\{[\s\S]*\}", text)
+def build_juror_prompt(task_spec: str, deliverable_evidence: str, precedents: List[Dict[str, Any]]) -> str:
+    precedent_context = ""
+    if precedents:
+        precedent_context = "HISTORICAL CASE PRECEDENTS FOR GUIDANCE (STARE DECISIS):\n"
+        for p in precedents:
+            precedent_context += (
+                f"- Case '{p.get('case_id', 'N/A')}' ({p.get('title', 'Precedent')}): Base split was {p.get('ruling_basis_points', 5000)} BPS "
+                f"({int(p.get('ruling_basis_points', 5000))/100}%). Fact summary: {p.get('fact_summary', '')}\n"
+            )
+        precedent_context += "\n"
+
+    return f"""You are an impartial algorithmic juror in the AgentCourt dispute resolution protocol on Base.
+Your task is to evaluate the deliverable submitted against the formal task specification and determine a fair payout split in basis points (0 to 10000, where 10000 = 100% to worker, 0 = 100% refund to client).
+
+{precedent_context}TASK SPECIFICATION:
+{task_spec}
+
+DELIVERABLE EVIDENCE / WORK AUDIT:
+{deliverable_evidence}
+
+Provide your ruling strictly in the following JSON format:
+{{
+  "worker_share_pct": <integer from 0 to 100>,
+  "client_share_pct": <integer from 0 to 100>,
+  "reasoning": "<concise 2-3 sentence legal/technical evaluation referencing criteria met/unmet and applicable precedent>"
+}}
+Only output valid JSON. No conversational preamble.
+"""
+
+
+def parse_verdict_json(text: str) -> Dict[str, Any]:
+    match = re.search(r'\{.*\}', text, re.DOTALL)
     if match:
-        text = match.group(0)
+        return json.loads(match.group(0))
     return json.loads(text)
 
 
-def _evaluate_claude(prompt: str) -> dict:
-    """Juror 1: Anthropic Claude (Auto-discovers active account model + handles ThinkingBlocks)"""
-    if not ANTHROPIC_API_KEY:
-        raise ValueError("ANTHROPIC_API_KEY not configured")
-    
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-    
-    try:
-        models_page = client.models.list()
-        target_model = models_page.data[0].id
-    except Exception:
-        target_model = "claude-opus-5"
-
-    res = client.messages.create(
-        model=target_model,
-        max_tokens=600,
-        messages=[{"role": "user", "content": prompt}]
-    )
-    
-    # Extract the actual text block (skipping any thinking blocks)
-    full_text = ""
-    for block in res.content:
-        if getattr(block, "type", "") == "text" or hasattr(block, "text"):
-            full_text += block.text
-            
-    data = _clean_json_response(full_text)
-    data["juror"] = f"Anthropic ({target_model})"
-    return data
-
-
-def _evaluate_openai(prompt: str) -> dict:
-    """Juror 2: OpenAI GPT"""
-    if not OPENAI_API_KEY:
-        raise ValueError("OPENAI_API_KEY not configured")
-    
+def deliberate_openai(prompt: str) -> Dict[str, Any]:
+    from openai import OpenAI
     client = OpenAI(api_key=OPENAI_API_KEY)
-    res = client.chat.completions.create(
+    response = client.chat.completions.create(
         model="gpt-4o-mini",
-        temperature=0.1,
-        response_format={"type": "json_object"},
-        messages=[{"role": "user", "content": prompt}]
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.1
     )
-    data = json.loads(res.choices[0].message.content)
-    data["juror"] = "OpenAI (gpt-4o-mini)"
-    return data
+    return parse_verdict_json(response.choices[0].message.content)
 
 
-def _evaluate_gemini(prompt: str) -> dict:
-    """Juror 3: Google Gemini"""
-    if not GEMINI_API_KEY:
-        raise ValueError("GEMINI_API_KEY not configured")
+def deliberate_google(prompt: str) -> Dict[str, Any]:
+    import google.generativeai as genai
+    genai.configure(api_key=GOOGLE_API_KEY)
+    model = genai.GenerativeModel("gemini-1.5-flash")
+    response = model.generate_content(prompt)
+    return parse_verdict_json(response.text)
+
+
+def arbitrate_task(task_spec: str, deliverable_evidence: str) -> Dict[str, Any]:
+    precedents = find_relevant_precedents(task_spec, deliverable_evidence, top_k=2)
+    prompt = build_juror_prompt(task_spec, deliverable_evidence, precedents)
     
-    client = genai.Client(api_key=GEMINI_API_KEY)
-    chat = client.chats.create(model="gemini-3.6-flash")
-    res = chat.send_message(prompt)
-    data = _clean_json_response(res.text)
-    data["juror"] = "Google (gemini-3.6-flash)"
-    return data
-
-
-def arbitrate_task(task_spec: str, submission: str) -> dict:
-    """
-    Arbitrates a dispute using a 3-juror AI panel and consensus aggregation.
-    """
-    # 1. Stare Decisis Precedent Lookup
-    precedents = []
-    try:
-        precedents = precedent_db.query_relevant_precedents(task_spec, submission, n_results=2)
-    except Exception:
-        pass
-
-    precedent_context = ""
-    if precedents:
-        precedent_context = "ESTABLISHED COURT PRECEDENTS:\n"
-        for p in precedents:
-            precedent_context += (
-                f"- Case #{p.get('task_id', 0)} (Similarity: {p.get('similarity', 0)*100:.1f}%): "
-                f"Ruled {p.get('client_share_pct', 50)}% to Client / {p.get('worker_share_pct', 50)}% to Worker. "
-                f"Summary: {p.get('opinion', '')}\n"
-            )
-
-    prompt = f"""
-You are an AI Juror for AgentCourt, a decentralized autonomous dispute court on Base.
-Analyze the task specification and the worker's submitted deliverables.
-Enforce Stare Decisis: if relevant precedents exist, align your ruling with historical standards.
-
-TASK SPECIFICATION:
-\"\"\"{task_spec}\"\"\"
-
-WORKER DELIVERABLE:
-\"\"\"{submission}\"\"\"
-
-{precedent_context}
-
-Respond ONLY with a valid JSON object strictly matching this schema:
-{{
-  "spec_adherence": <integer 0-100>,
-  "code_quality": <integer 0-100>,
-  "client_share_pct": <integer 0-100>,
-  "worker_share_pct": <integer 0-100>,
-  "court_opinion": "<2-4 sentence legal evaluation citing any relevant precedent>"
-}}
-
-CRITICAL RULES:
-1. client_share_pct + worker_share_pct MUST equal exactly 100.
-2. Perfect execution = 100% to worker.
-3. Total breach or junk = 100% to client.
-4. Partial bugs = proportional split matching precedent.
-"""
-
-    # 2. Gather Independent Verdicts from the Panel
-    verdicts = []
-    jurors = [
-        ("Anthropic", _evaluate_claude),
-        ("OpenAI", _evaluate_openai),
-        ("Google", _evaluate_gemini)
-    ]
-
-    for name, evaluator in jurors:
+    juror_rulings = []
+    
+    # Juror 1: OpenAI
+    if OPENAI_API_KEY:
         try:
-            verdict = evaluator(prompt)
-            client_pct = int(verdict.get("client_share_pct", 50))
-            worker_pct = 100 - client_pct
-            verdict["client_share_pct"] = client_pct
-            verdict["worker_share_pct"] = worker_pct
-            verdicts.append(verdict)
+            r = deliberate_openai(prompt)
+            juror_rulings.append(("OpenAI GPT-4o", r))
         except Exception as e:
-            print(f"[!] Juror {name} deliberation failed: {e}")
+            print(f"[!] Juror OpenAI deliberation failed: {e}")
 
-    # 3. Consensus Quorum Check (Require >= 2 jurors)
-    if len(verdicts) >= 2:
-        avg_client_share = round(sum(v["client_share_pct"] for v in verdicts) / len(verdicts))
-        avg_worker_share = 100 - avg_client_share
-        avg_spec = round(sum(v["spec_adherence"] for v in verdicts) / len(verdicts))
-        avg_quality = round(sum(v["code_quality"] for v in verdicts) / len(verdicts))
+    # Juror 2: Google Gemini
+    if GOOGLE_API_KEY:
+        try:
+            r = deliberate_google(prompt)
+            juror_rulings.append(("Google Gemini", r))
+        except Exception as e:
+            print(f"[!] Juror Google deliberation failed: {e}")
 
-        opinions = [f"[{v['juror']}]: {v['court_opinion']}" for v in verdicts]
-        joint_opinion = " | ".join(opinions)
-
+    if not juror_rulings:
         return {
-            "spec_adherence": avg_spec,
-            "code_quality": avg_quality,
-            "client_share_pct": avg_client_share,
-            "worker_share_pct": avg_worker_share,
-            "court_opinion": joint_opinion,
-            "provider": f"AgentCourt 3-Juror Panel ({len(verdicts)}/3 Quorum: {', '.join(v['juror'] for v in verdicts)})",
-            "panel_breakdown": verdicts
+            "worker_share_pct": 50,
+            "client_share_pct": 50,
+            "court_opinion": "Quorum unavailable; defaulted to 50/50 split.",
+            "juror_opinions": [],
+            "precedents": precedents
         }
 
-    # If single juror succeeded
-    if len(verdicts) == 1:
-        single = verdicts[0]
-        single["provider"] = f"Single Juror Fallback ({single['juror']})"
-        return single
+    worker_votes = []
+    for _, r in juror_rulings:
+        pct = r.get("worker_share_pct", 50)
+        if pct > 100:
+            pct = round(pct / 100)
+        worker_votes.append(pct)
 
-    # Deterministic Rule-Based Fallback
+    avg_worker_pct = round(sum(worker_votes) / len(worker_votes))
+    avg_client_pct = 100 - avg_worker_pct
+
+    opinions_summary = " | ".join([f"{name}: {r.get('reasoning', '')}" for name, r in juror_rulings])
+
     return {
-        "spec_adherence": 100,
-        "code_quality": 100,
-        "client_share_pct": 0,
-        "worker_share_pct": 100,
-        "court_opinion": "Deliverable satisfies all functional requirements and passes test suite.",
-        "provider": "Rule-Based Deterministic Engine (Zero Juror Quorum)"
+        "worker_share_pct": avg_worker_pct,
+        "client_share_pct": avg_client_pct,
+        "court_opinion": opinions_summary,
+        "juror_opinions": juror_rulings,
+        "precedents": precedents
     }

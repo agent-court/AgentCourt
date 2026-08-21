@@ -14,3 +14,8 @@ agentcourt_db/
 *agentcourt_db*
 .court_metadata_cache/
 node_modules/
+
+.env
+.env.local
+__pycache__/
+.venv/

@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { Shield, Activity, Scale, CheckCircle2, Clock, Terminal, AlertTriangle } from 'lucide-react';
+import { CreateJobModal } from '@/components/CreateJobModal';
 
 interface Job {
   job_id: number;
@@ -34,7 +35,6 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [wsConnected, setWsConnected] = useState(false);
 
-  // Fetch Jobs from FastAPI backend
   const fetchJobs = async () => {
     try {
       const res = await fetch('http://127.0.0.1:8000/jobs');
@@ -55,15 +55,10 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, []);
 
-  // WebSocket Connection
   useEffect(() => {
     const ws = new WebSocket('ws://127.0.0.1:8000/ws/stream');
 
-    ws.onopen = () => {
-      setWsConnected(true);
-      console.log('Connected to AgentCourt WS Stream');
-    };
-
+    ws.onopen = () => setWsConnected(true);
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
@@ -75,7 +70,6 @@ export default function Dashboard() {
         console.error('WS Parse Error:', err);
       }
     };
-
     ws.onclose = () => setWsConnected(false);
     return () => ws.close();
   }, []);
@@ -95,8 +89,7 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
-      {/* Navbar */}
-      <header className="border-b border-slate-800 bg-slate-900/50 backdrop-blur-md sticky top-0 z-50">
+      <header className="border-b border-slate-800 bg-slate-900/50 backdrop-blur-md sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-lg bg-blue-600/20 text-blue-400 border border-blue-500/30">
@@ -108,6 +101,7 @@ export default function Dashboard() {
             </div>
           </div>
           <div className="flex items-center gap-4">
+            <CreateJobModal onJobCreated={fetchJobs} />
             <div className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-full bg-slate-900 border border-slate-800">
               <span className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-emerald-400 animate-pulse' : 'bg-red-400'}`} />
               <span className="text-slate-400">{wsConnected ? 'Oracle Live' : 'Reconnecting'}</span>
@@ -117,9 +111,7 @@ export default function Dashboard() {
         </div>
       </header>
 
-      {/* Main Grid */}
       <main className="max-w-7xl mx-auto px-6 py-8 flex-1 w-full grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Left 2 Cols: On-Chain Escrow Feed */}
         <div className="lg:col-span-2 space-y-6">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-bold flex items-center gap-2">
@@ -150,7 +142,6 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* Right 1 Col: Live Oracle & Deliberation Terminal */}
         <div className="space-y-4">
           <h2 className="text-xl font-bold flex items-center gap-2">
             <Terminal className="w-5 h-5 text-emerald-400" />
