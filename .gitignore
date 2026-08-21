@@ -1,28 +1,19 @@
+# Secrets and environment variables
 .env
-.env*
-.venv/
-__pycache__/
-*.pyc
-*.sqlite3
-*.egg-info/
-*~
-.DS_Store
-chroma_court_db/
-chroma_db/
-.*chroma_db*
-agentcourt_db/
-*agentcourt_db*
-.court_metadata_cache/
-node_modules/
-
-.env
-.env.local
-__pycache__/
-.venv/
-
-# Sensitive Keys and Text Secrets
-*_key.txt
+.env.*
+!.env.example
 *.key
 *.pem
-treasury_key.txt
-worker_key.txt
+*key.txt
+private_keys.json
+
+# Python virtual environment & caches
+.venv/
+venv/
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# OS artifacts
+.DS_Store
