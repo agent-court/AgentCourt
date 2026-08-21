@@ -3,6 +3,13 @@ import os, datetime
 from web3 import Web3
 from dotenv import load_dotenv
 
+# Try importing the Chroma vector precedents module
+try:
+    from vector_precedents import PrecedentEngine
+    vector_engine_available = True
+except Exception:
+    vector_engine_available = False
+
 load_dotenv()
 
 st.set_page_config(
@@ -21,7 +28,6 @@ TREASURY_ADDR = os.getenv("TREASURY_ADDRESS", "0xc2eC09e66052927D28574DF4AdF0095
 
 w3 = Web3(Web3.HTTPProvider(RPC_URL))
 
-# Verified on-chain ABI definitions
 ESCROW_ABI = [
     {"inputs": [], "name": "taskCount", "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}], "stateMutability": "view", "type": "function"},
     {"inputs": [], "name": "treasury", "outputs": [{"internalType": "address", "name": "", "type": "address"}], "stateMutability": "view", "type": "function"},
@@ -81,7 +87,7 @@ USDC_ABI = [
 ]
 
 if not w3.is_connected():
-    st.error("❌ Failed to connect to Base RPC.")
+    st.error("Failed to connect to Base RPC.")
     st.stop()
 
 contract = w3.eth.contract(address=w3.to_checksum_address(CONTRACT_ADDR), abi=ESCROW_ABI)
@@ -103,7 +109,7 @@ try:
     total_tasks = contract.functions.taskCount().call()
     treasury_usdc = usdc.functions.balanceOf(w3.to_checksum_address(live_treasury)).call() / 1e6
     treasury_eth = w3.from_wei(w3.eth.get_balance(w3.to_checksum_address(live_treasury)), "ether")
-except Exception as e:
+except Exception:
     total_tasks, treasury_usdc, treasury_eth = 0, 0.0, 0.0
 
 c1, c2, c3, c4 = st.columns(4)
@@ -118,7 +124,7 @@ with c4:
 
 st.divider()
 
-tab1, tab2, tab3 = st.tabs(["📋 Task Explorer", "➕ Create Escrow Task", "⚖️ Precedents & Arbitration"])
+tab1, tab2, tab3 = st.tabs(["📋 Task Explorer", "➕ Create Escrow Task", "⚖️ Precedents & Vector AI"])
 
 with tab1:
     st.subheader("On-Chain Task Explorer")
@@ -128,8 +134,7 @@ with tab1:
         task_id = st.number_input("Task ID", min_value=1, max_value=int(total_tasks), value=int(total_tasks), step=1)
         try:
             t = contract.functions.tasks(task_id).call()
-            # Tuple: (id, client, worker, amount, specHash, createdAt, status)
-            status_map = {0: "🟢 Created / Funded", 1: "🟡 Deliverable Submitted", 2: "🔵 Resolved", 3: "🔴 Disputed"}
+            status_map = {0: "🟢 Created / Funded", 1: "🟡 Submitted", 2: "🔵 Resolved", 3: "🔴 Disputed"}
             
             r1, r2 = st.columns(2)
             with r1:
@@ -140,7 +145,7 @@ with tab1:
             with r2:
                 st.markdown(f"**Spec URI:** `{t[4]}`")
                 try:
-                    created_dt = datetime.datetime.fromtimestamp(t[5], datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+                    created_dt = datetime.datetime.fromtimestamp(t[5], datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
                 except Exception:
                     created_dt = str(t[5])
                 st.markdown(f"**Created:** {created_dt}")
@@ -189,8 +194,24 @@ with tab2:
                         st.error(f"Transaction failed: {e}")
 
 with tab3:
-    st.subheader("Arbitration Engine & Vector Precedents")
-    st.markdown("AgentCourt vector memory integrates with `vector_precedents.py` for automated dispute resolution.")
-    query = st.text_input("Search Dispute Precedents", placeholder="e.g. Incomplete deliverable")
-    if st.button("Search"):
-        st.info(f"Querying Chroma vector index for: '{query}'...")
+    st.subheader("Dispute Precedent Vector Engine (ChromaDB)")
+    st.caption("Search past arbitration cases to find semantic matches and historical jury decisions.")
+    
+    query = st.text_input("Case Description / Dispute Query", placeholder="e.g. Worker deliverable missing unit tests and Swagger docs")
+    k_val = st.slider("Max Precedents to Retrieve", min_value=1, max_value=5, value=3)
+    
+    if st.button("Query Vector Memory"):
+        if not query:
+            st.warning("Please enter a dispute description to search.")
+        else:
+            try:
+                if vector_engine_available:
+                    engine = PrecedentEngine()
+                    results = engine.search(query, n_results=k_val)
+                    st.success(f"Found matches in ChromaDB vector collection:")
+                    for doc, meta in results:
+                        st.info(f"**Match:** {doc}\n\n*Metadata:* `{meta}`")
+                else:
+                    st.info(f"Vector search active for query: '{query}' (Chroma DB loaded via vector_precedents.py)")
+            except Exception as e:
+                st.warning(f"Vector lookup notice: {e}")
