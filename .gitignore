@@ -19,3 +19,10 @@ node_modules/
 .env.local
 __pycache__/
 .venv/
+
+# Sensitive Keys and Text Secrets
+*_key.txt
+*.key
+*.pem
+treasury_key.txt
+worker_key.txt
