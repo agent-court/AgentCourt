@@ -2,6 +2,7 @@ README.md
 pyproject.toml
 agentcourt/__init__.py
 agentcourt/client.py
+agentcourt/tools.py
 agentcourt.egg-info/PKG-INFO
 agentcourt.egg-info/SOURCES.txt
 agentcourt.egg-info/dependency_links.txt

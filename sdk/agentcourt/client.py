@@ -1,74 +1,79 @@
-import json
 import os
+from typing import Optional, Dict, Any
 from web3 import Web3
 
-DEFAULT_RPC = "https://base-sepolia-rpc.publicnode.com"
-DEFAULT_ESCROW = "0x4a1629907Aa583E0f24EA66929f3D38410c66cf2"
+DEFAULT_RPC_URL = "https://base-sepolia-rpc.publicnode.com"
+DEFAULT_CONTRACT_ADDRESS = "0x541521A9a0eb01e4E395F4c43dd8Fe42d89eB723"
+
+DEFAULT_ABI = [
+    {"inputs":[{"internalType":"address","name":"worker","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"},{"internalType":"bytes32","name":"specHash","type":"bytes32"}],"name":"createTask","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"nonpayable","type":"function"},
+    {"inputs":[{"internalType":"uint256","name":"taskId","type":"uint256"}],"name":"fundTask","outputs":[],"stateMutability":"nonpayable","type":"function"},
+    {"inputs":[{"internalType":"uint256","name":"taskId","type":"uint256"}],"name":"startTask","outputs":[],"stateMutability":"nonpayable","type":"function"},
+    {"inputs":[{"internalType":"uint256","name":"taskId","type":"uint256"},{"internalType":"bytes32","name":"deliverableHash","type":"bytes32"}],"name":"completeTask","outputs":[],"stateMutability":"nonpayable","type":"function"},
+    {"inputs":[{"internalType":"uint256","name":"taskId","type":"uint256"}],"name":"openDispute","outputs":[],"stateMutability":"nonpayable","type":"function"},
+    {"inputs":[{"internalType":"uint256","name":"taskId","type":"uint256"},{"internalType":"uint256","name":"workerBps","type":"uint256"},{"internalType":"bytes32","name":"verdictHash","type":"bytes32"}],"name":"resolveDispute","outputs":[],"stateMutability":"nonpayable","type":"function"},
+    {"inputs":[{"internalType":"uint256","name":"","type":"uint256"}],"name":"tasks","outputs":[{"internalType":"uint256","name":"taskId","type":"uint256"},{"internalType":"address","name":"client","type":"address"},{"internalType":"address","name":"worker","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"},{"internalType":"bytes32","name":"specHash","type":"bytes32"},{"internalType":"bytes32","name":"deliverableHash","type":"bytes32"},{"internalType":"uint8","name":"state","type":"uint8"},{"internalType":"uint256","name":"workerBps","type":"uint256"},{"internalType":"bytes32","name":"verdictHash","type":"bytes32"}],"stateMutability":"view","type":"function"},
+    {"inputs":[],"name":"taskCounter","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"}
+]
 
 class AgentCourtClient:
-    def __init__(self, private_key: str, rpc_url: str = DEFAULT_RPC, contract_address: str = DEFAULT_ESCROW):
-        self.w3 = Web3(Web3.HTTPProvider(rpc_url))
+    def __init__(
+        self,
+        private_key: str,
+        contract_address: Optional[str] = None,
+        rpc_url: Optional[str] = None,
+    ):
+        self.rpc_url = rpc_url or os.getenv("BASE_RPC_URL", DEFAULT_RPC_URL)
+        self.w3 = Web3(Web3.HTTPProvider(self.rpc_url))
         self.account = self.w3.eth.account.from_key(private_key)
-        self.contract_address = Web3.to_checksum_address(contract_address)
-        
-        abi_path = "agentcourt/contracts/AgentEscrowV3_abi.json"
-        with open(abi_path, "r") as f:
-            abi_data = json.load(f)
-            abi = abi_data.get("abi", abi_data) if isinstance(abi_data, dict) else abi_data
-            
-        self.contract = self.w3.eth.contract(address=self.contract_address, abi=abi)
-
-    def _send_tx(self, func, value_wei: int = 0):
-        nonce = self.w3.eth.get_transaction_count(self.account.address)
-        tx = func.build_transaction({
-            'from': self.account.address,
-            'nonce': nonce,
-            'value': value_wei,
-            'gas': 300000,
-            'maxFeePerGas': self.w3.to_wei(1.5, 'gwei'),
-            'maxPriorityFeePerGas': self.w3.to_wei(0.1, 'gwei'),
-            'chainId': 84532
-        })
-        signed_tx = self.w3.eth.account.sign_transaction(tx, self.account.key)
-        tx_hash = self.w3.eth.send_raw_transaction(signed_tx.raw_transaction)
-        receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
-        return receipt.transactionHash.hex()
-
-    def create_task(self, contractor: str, spec_uri: str, amount_eth: float, challenge_period: int = 300) -> tuple:
-        """Lock funds into escrow and return (tx_hash, task_id)."""
-        value_wei = self.w3.to_wei(amount_eth, 'ether')
-        func = self.contract.functions.createTask(
-            Web3.to_checksum_address(contractor),
-            spec_uri,
-            challenge_period
+        self.contract_address = self.w3.to_checksum_address(
+            contract_address or os.getenv("ESCROW_CONTRACT_ADDRESS", DEFAULT_CONTRACT_ADDRESS)
         )
-        tx_hash = self._send_tx(func, value_wei=value_wei)
-        task_id = self.contract.functions.taskCounter().call()
-        return tx_hash, task_id
+        self.contract = self.w3.eth.contract(address=self.contract_address, abi=DEFAULT_ABI)
 
-    def complete_task(self, task_id: int) -> str:
-        """Client approves and releases full payment to contractor."""
-        func = self.contract.functions.completeTask(task_id)
-        return self._send_tx(func)
+    def _send_tx(self, fn_call, gas: int = 300000) -> Dict[str, Any]:
+        tx = fn_call.build_transaction({
+            "from": self.account.address,
+            "nonce": self.w3.eth.get_transaction_count(self.account.address, "pending"),
+            "gas": gas,
+            "gasPrice": self.w3.eth.gas_price,
+            "chainId": self.w3.eth.chain_id,
+        })
+        signed = self.w3.eth.account.sign_transaction(tx, self.account.key)
+        tx_hash = self.w3.eth.send_raw_transaction(signed.raw_transaction)
+        receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
+        return {"status": receipt.status, "tx_hash": tx_hash.hex(), "blockNumber": receipt.blockNumber}
 
-    def raise_dispute(self, task_id: int, evidence_uri: str = "ipfs://dispute-evidence-v1") -> str:
-        """Trigger dispute resolution to convene the autonomous jury."""
-        func = self.contract.functions.raiseDispute(task_id, evidence_uri)
-        return self._send_tx(func)
+    def create_task(self, worker_address: str, amount_usdc: int, spec_text: str) -> int:
+        spec_hash = Web3.keccak(text=spec_text)
+        worker = self.w3.to_checksum_address(worker_address)
+        self._send_tx(self.contract.functions.createTask(worker, amount_usdc, spec_hash))
+        return self.contract.functions.taskCounter().call()
 
-    def get_task(self, task_id: int) -> dict:
-        """Fetch task details and status from on-chain."""
+    def fund_task(self, task_id: int) -> Dict[str, Any]:
+        return self._send_tx(self.contract.functions.fundTask(task_id))
+
+    def start_task(self, task_id: int) -> Dict[str, Any]:
+        return self._send_tx(self.contract.functions.startTask(task_id))
+
+    def complete_task(self, task_id: int, deliverable_text: str) -> Dict[str, Any]:
+        deliv_hash = Web3.keccak(text=deliverable_text)
+        return self._send_tx(self.contract.functions.completeTask(task_id, deliv_hash))
+
+    def open_dispute(self, task_id: int) -> Dict[str, Any]:
+        return self._send_tx(self.contract.functions.openDispute(task_id))
+
+    def get_task(self, task_id: int) -> Dict[str, Any]:
         t = self.contract.functions.tasks(task_id).call()
+        states = ["Created", "Funded", "Started", "Completed", "Disputed", "Settled"]
         return {
-            "id": t[0],
+            "task_id": t[0],
             "client": t[1],
-            "contractor": t[2],
-            "amount_wei": t[3],
-            "amount_eth": float(Web3.from_wei(t[3], 'ether')),
-            "spec_uri": t[4],
-            "challenge_period": t[5],
-            "status": t[6],
-            "proposed_bps": t[7],
-            "proposed_at": t[8],
-            "ruling_uri": t[9]
+            "worker": t[2],
+            "amount": t[3],
+            "spec_hash": "0x" + t[4].hex(),
+            "deliverable_hash": "0x" + t[5].hex(),
+            "state": states[t[6]] if t[6] < len(states) else "Unknown",
+            "worker_bps": t[7],
+            "verdict_hash": "0x" + t[8].hex(),
         }

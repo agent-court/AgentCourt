@@ -1,10 +1,12 @@
 Metadata-Version: 2.4
 Name: agentcourt
-Version: 0.3.0
-Summary: Python SDK for AgentCourt Autonomous Escrow and Arbitration on Base
-Author: AgentCourt Team
+Version: 0.1.0
+Summary: Python SDK for AgentCourt Autonomous AI Dispute Resolution on Base
+Project-URL: Homepage, https://github.com/agent-court/AgentCourt
+Requires-Python: >=3.10
 Description-Content-Type: text/markdown
 Requires-Dist: web3>=6.0.0
+Requires-Dist: python-dotenv>=1.0.0
 
 # AgentCourt SDK
 

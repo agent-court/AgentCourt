@@ -1,153 +1,79 @@
 import os
-import re
-import json
-import ssl
-import urllib.request
-import urllib.error
-from openai import OpenAI
+from typing import Optional, Dict, Any
+from web3 import Web3
 
-try:
-    import anthropic
-except ImportError:
-    anthropic = None
+DEFAULT_RPC_URL = "https://base-sepolia-rpc.publicnode.com"
+DEFAULT_CONTRACT_ADDRESS = "0x541521A9a0eb01e4E395F4c43dd8Fe42d89eB723"
 
-try:
-    import certifi
-    SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
-except Exception:
-    SSL_CONTEXT = ssl._create_unverified_context()
+DEFAULT_ABI = [
+    {"inputs":[{"internalType":"address","name":"worker","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"},{"internalType":"bytes32","name":"specHash","type":"bytes32"}],"name":"createTask","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"nonpayable","type":"function"},
+    {"inputs":[{"internalType":"uint256","name":"taskId","type":"uint256"}],"name":"fundTask","outputs":[],"stateMutability":"nonpayable","type":"function"},
+    {"inputs":[{"internalType":"uint256","name":"taskId","type":"uint256"}],"name":"startTask","outputs":[],"stateMutability":"nonpayable","type":"function"},
+    {"inputs":[{"internalType":"uint256","name":"taskId","type":"uint256"},{"internalType":"bytes32","name":"deliverableHash","type":"bytes32"}],"name":"completeTask","outputs":[],"stateMutability":"nonpayable","type":"function"},
+    {"inputs":[{"internalType":"uint256","name":"taskId","type":"uint256"}],"name":"openDispute","outputs":[],"stateMutability":"nonpayable","type":"function"},
+    {"inputs":[{"internalType":"uint256","name":"taskId","type":"uint256"},{"internalType":"uint256","name":"workerBps","type":"uint256"},{"internalType":"bytes32","name":"verdictHash","type":"bytes32"}],"name":"resolveDispute","outputs":[],"stateMutability":"nonpayable","type":"function"},
+    {"inputs":[{"internalType":"uint256","name":"","type":"uint256"}],"name":"tasks","outputs":[{"internalType":"uint256","name":"taskId","type":"uint256"},{"internalType":"address","name":"client","type":"address"},{"internalType":"address","name":"worker","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"},{"internalType":"bytes32","name":"specHash","type":"bytes32"},{"internalType":"bytes32","name":"deliverableHash","type":"bytes32"},{"internalType":"uint8","name":"state","type":"uint8"},{"internalType":"uint256","name":"workerBps","type":"uint256"},{"internalType":"bytes32","name":"verdictHash","type":"bytes32"}],"stateMutability":"view","type":"function"},
+    {"inputs":[],"name":"taskCounter","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"}
+]
 
 class AgentCourtClient:
-    def __init__(self):
-        self.openai_key = os.getenv("OPENAI_API_KEY")
-        self.anthropic_key = os.getenv("ANTHROPIC_API_KEY")
-        self.gemini_key = os.getenv("GEMINI_API_KEY")
+    def __init__(
+        self,
+        private_key: str,
+        contract_address: Optional[str] = None,
+        rpc_url: Optional[str] = None,
+    ):
+        self.rpc_url = rpc_url or os.getenv("BASE_RPC_URL", DEFAULT_RPC_URL)
+        self.w3 = Web3(Web3.HTTPProvider(self.rpc_url))
+        self.account = self.w3.eth.account.from_key(private_key)
+        self.contract_address = self.w3.to_checksum_address(
+            contract_address or os.getenv("ESCROW_CONTRACT_ADDRESS", DEFAULT_CONTRACT_ADDRESS)
+        )
+        self.contract = self.w3.eth.contract(address=self.contract_address, abi=DEFAULT_ABI)
 
-    def _evaluate_openai(self, spec: str, evidence: str) -> dict:
-        if not self.openai_key:
-            return None
-        try:
-            client = OpenAI(api_key=self.openai_key)
-            prompt = f"""
-You are an objective AI Juror in AgentCourt evaluating an escrow dispute.
-Task Spec: {spec}
-Delivered Evidence: {evidence}
+    def _send_tx(self, fn_call, gas: int = 300000) -> Dict[str, Any]:
+        tx = fn_call.build_transaction({
+            "from": self.account.address,
+            "nonce": self.w3.eth.get_transaction_count(self.account.address, "pending"),
+            "gas": gas,
+            "gasPrice": self.w3.eth.gas_price,
+            "chainId": self.w3.eth.chain_id,
+        })
+        signed = self.w3.eth.account.sign_transaction(tx, self.account.key)
+        tx_hash = self.w3.eth.send_raw_transaction(signed.raw_transaction)
+        receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
+        return {"status": receipt.status, "tx_hash": tx_hash.hex(), "blockNumber": receipt.blockNumber}
 
-Determine the percentage (0 to 100) of the escrow funds that should be awarded to the Worker based on contract fulfillment.
-Respond in this EXACT format:
-RULING: <integer between 0 and 100>
-OPINION: <1-2 sentences justifying your decision>
-"""
-            res = client.chat.completions.create(
-                model="gpt-4o",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.2
-            )
-            text = res.choices[0].message.content.strip()
-            match = re.search(r"RULING:\s*(\d+)", text)
-            pct = int(match.group(1)) if match else 50
-            opinion_match = re.search(r"OPINION:\s*(.*)", text, re.DOTALL)
-            opinion = opinion_match.group(1).strip() if opinion_match else text
-            return {"juror": "OpenAI GPT-4o", "worker_pct": pct, "opinion": opinion}
-        except Exception as e:
-            return {"juror": "OpenAI GPT-4o", "worker_pct": 50, "opinion": f"Evaluation error: {e}"}
+    def create_task(self, worker_address: str, amount_usdc: int, spec_text: str) -> int:
+        spec_hash = Web3.keccak(text=spec_text)
+        worker = self.w3.to_checksum_address(worker_address)
+        self._send_tx(self.contract.functions.createTask(worker, amount_usdc, spec_hash))
+        return self.contract.functions.taskCounter().call()
 
-    def _evaluate_anthropic(self, spec: str, evidence: str) -> dict:
-        if not self.anthropic_key or not anthropic:
-            return None
-        
-        models_to_try = [
-            "claude-sonnet-4-6",
-            "claude-3-5-sonnet-20241022",
-            "claude-3-haiku-20240307"
-        ]
+    def fund_task(self, task_id: int) -> Dict[str, Any]:
+        return self._send_tx(self.contract.functions.fundTask(task_id))
 
-        client = anthropic.Anthropic(api_key=self.anthropic_key)
-        prompt = f"""
-You are an objective AI Juror in AgentCourt evaluating an escrow dispute.
-Task Spec: {spec}
-Delivered Evidence: {evidence}
+    def start_task(self, task_id: int) -> Dict[str, Any]:
+        return self._send_tx(self.contract.functions.startTask(task_id))
 
-Determine the percentage (0 to 100) of the escrow funds that should be awarded to the Worker based on contract fulfillment.
-Respond in this EXACT format:
-RULING: <integer between 0 and 100>
-OPINION: <1-2 sentences justifying your decision>
-"""
-        for model_id in models_to_try:
-            try:
-                msg = client.messages.create(
-                    model=model_id,
-                    max_tokens=256,
-                    temperature=0.2,
-                    messages=[{"role": "user", "content": prompt}]
-                )
-                text = msg.content[0].text.strip()
-                match = re.search(r"RULING:\s*(\d+)", text)
-                pct = int(match.group(1)) if match else 50
-                opinion_match = re.search(r"OPINION:\s*(.*)", text, re.DOTALL)
-                opinion = opinion_match.group(1).strip() if opinion_match else text
-                return {"juror": f"Anthropic ({model_id})", "worker_pct": pct, "opinion": opinion}
-            except Exception:
-                continue
+    def complete_task(self, task_id: int, deliverable_text: str) -> Dict[str, Any]:
+        deliv_hash = Web3.keccak(text=deliverable_text)
+        return self._send_tx(self.contract.functions.completeTask(task_id, deliv_hash))
 
-        return {"juror": "Anthropic Claude", "worker_pct": 50, "opinion": "No accessible Claude model found."}
+    def open_dispute(self, task_id: int) -> Dict[str, Any]:
+        return self._send_tx(self.contract.functions.openDispute(task_id))
 
-    def _evaluate_gemini(self, spec: str, evidence: str) -> dict:
-        if not self.gemini_key:
-            return None
-        
-        models_to_try = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"]
-        prompt = f"""
-You are an objective AI Juror in AgentCourt evaluating an escrow dispute.
-Task Spec: {spec}
-Delivered Evidence: {evidence}
-
-Determine the percentage (0 to 100) of the escrow funds that should be awarded to the Worker based on contract fulfillment.
-Respond in this EXACT format:
-RULING: <integer between 0 and 100>
-OPINION: <1-2 sentences justifying your decision>
-"""
-        payload = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode("utf-8")
-
-        for model_id in models_to_try:
-            try:
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={self.gemini_key}"
-                req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
-                with urllib.request.urlopen(req, context=SSL_CONTEXT, timeout=15) as response:
-                    res_data = json.loads(response.read().decode("utf-8"))
-                    text = res_data["candidates"][0]["content"]["parts"][0]["text"].strip()
-
-                match = re.search(r"RULING:\s*(\d+)", text)
-                pct = int(match.group(1)) if match else 50
-                opinion_match = re.search(r"OPINION:\s*(.*)", text, re.DOTALL)
-                opinion = opinion_match.group(1).strip() if opinion_match else text
-                return {"juror": f"Google Gemini ({model_id})", "worker_pct": pct, "opinion": opinion}
-            except Exception:
-                continue
-
-        return None
-
-    def evaluate(self, spec: str, evidence: str) -> dict:
-        evaluators = [self._evaluate_openai, self._evaluate_anthropic, self._evaluate_gemini]
-        juror_results = []
-
-        for eval_fn in evaluators:
-            res = eval_fn(spec, evidence)
-            if res:
-                juror_results.append(res)
-
-        if not juror_results:
-            juror_results.append({"juror": "Fallback Juror", "worker_pct": 50, "opinion": "Default split."})
-
-        total_worker_pct = sum(j["worker_pct"] for j in juror_results)
-        consensus_worker = round(total_worker_pct / len(juror_results))
-        consensus_client = 100 - consensus_worker
-
-        formatted_opinions = " | ".join([f"{j['juror']}: {j['opinion']}" for j in juror_results])
-
+    def get_task(self, task_id: int) -> Dict[str, Any]:
+        t = self.contract.functions.tasks(task_id).call()
+        states = ["Created", "Funded", "Started", "Completed", "Disputed", "Settled"]
         return {
-            "worker_share_pct": consensus_worker,
-            "client_share_pct": consensus_client,
-            "court_opinion": formatted_opinions,
-            "juror_count": len(juror_results)
+            "task_id": t[0],
+            "client": t[1],
+            "worker": t[2],
+            "amount": t[3],
+            "spec_hash": "0x" + t[4].hex(),
+            "deliverable_hash": "0x" + t[5].hex(),
+            "state": states[t[6]] if t[6] < len(states) else "Unknown",
+            "worker_bps": t[7],
+            "verdict_hash": "0x" + t[8].hex(),
         }
