@@ -1,31 +1,71 @@
-# AgentCourt (V5) ⚖️
-**Decentralized, Deterministic AI Arbitration Protocol on Base**
+# ☜️ AgentCourt: Autonomous Multi-Model Dispute Resolution on Base
 
-AgentCourt is an institutional settlement infrastructure designed for autonomous agent commerce.
+AgentCourt is a decentralized arbitration layer for autonomous AI agents and freelance smart contracts, settled on **Base Sepolia**. When disputes arise, an autonomous jury quorum (**Gemini**, **GPT-4o**, and **Claude**) deliberates over cryptographic spec/deliverable hashes, queries machine case law via ChromaDB, and executes split basis-point settlements directly on-chain.
 
----
-
-## 🏗️ Protocol Architecture
-
-- `AgentEscrowV5`: Production USDC escrow contract on Base with basis-points (BPS) allocation.
-- `vector_precedents.py`: Persistent ChromaDB semantic case law memory (*Machine Stare Decisis*).
-- `arbitrator.py`: Multi-LLM jury panel (Gemini, GPT-4o, Claude) running at zero-temperature with deterministic median BPS quorum.
-- `daemon_v3.py`: Automated event listener and on-chain resolution executor.
+�P **Live Observability Dashboard**: [agentcourt.streamlit.app](https://agentcourt.streamlit.app)
 
 ---
 
-## 🔰 State Machine Invariants
+## 🏛️ System Architecture
 
-`Created` → `Funded` → `Started` → `Completed` → `Disputed` → `Settled`
-- No unilateral bypasses or reversible states.
-- Every dispute resolution commits a `bytes32 verdictHash` on-chain.
+```
+ AI Agent / Client ] ──(SDK / REST API)──> [ AgentEscrowV5 (Base Sepolia) ]
+                                                                                      │
+                                                                                  (Dispute Event)
+                                                                                      ▼
+                                                                               [ Autonomous Daemon ]
+                                                                                        │
+                         ┌>──────────────────────────────└─────────────────────────────╗
+                         ▼                                                         ▼                                                         ▼
+                 [ Gemini 2.5 Flash ]             [GPT-4o]               [ Claude Sonnet ]
+                         │                                                         │                                                         │
+                         └──────────────────────────────╔─────────────────────────────┙
+                                                                                        │
+                                                                           (Consensus & Precedent Index)
+                                                                                      │
+                                                                                      ▼
+                                                                           [ ChromaDB Machine Stare Decisis ]
+                                                                                       │
+                                                                                      ▼
+                                                                               [ On-Chain BPS Settlement ]
+```
 
 ---
 
-## ✅ Live Demo & Simulation
-
-Run the 60-second agent-to-agent direct dispute and settlement simulation:
+## 📦 Python SDK Installation
 
 ```bash
-python scripts/simulate_dispute.py
+pip install agentcourt
 ```
+
+### Quickstart Example
+
+```python
+import os
+from agentcourt import AgentCourtClient
+
+client = AgentCourtClient(private_key=os.getenv("PRIVATE_KEY"))
+
+# 1. Create a task with specification
+task_id = client.create_task(
+    worker_address="0x6F8beD09195f041902e1a1640569FDa8cBeb3E3c",
+    amount_usdc=100,
+    spec_text="Build an automated subgraph indexing bot with test suites."
+)
+
+# 2. Fund and start task
+client.fund_task(task_id)
+client.start_task(task_id)
+
+# 3. Open dispute if deliverable fails specification
+client.open_dispute(task_id)
+
+# 4. Fetch on-chain status
+task = client.get_task(task_id)
+print(f"Task #{task_id} State: {task['state']}")
+```
+
+---
+
+## 👀 license
+MIT
