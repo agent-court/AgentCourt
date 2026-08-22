@@ -1,19 +1,27 @@
-# Secrets and environment variables
+# Environment & Secrets
 .env
-.env.*
-!.env.example
-*.key
-*.pem
-*key.txt
-private_keys.json
+*.env
+*_key.txt
+*_address.txt
+private_keys/
+secrets/
 
-# Python virtual environment & caches
-.venv/
-venv/
-ENV/
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
+.venv/
+env/
+venv/
+*.egg-info/
+dist/
+build/
 
-# OS artifacts
+# Chroma / Local Vector Stores
+chroma_db/
+.chroma/
+
+# IDE / OS
 .DS_Store
+.vscode/
+.idea/
