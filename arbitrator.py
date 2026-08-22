@@ -5,6 +5,7 @@ and cryptographic verdict hashing for AgentEscrowV5.
 """
 
 import os
+import re
 import json
 import statistics
 import hashlib
@@ -83,6 +84,14 @@ Provide your judgment in the following JSON format:
 """
 
 
+def _clean_json_response(raw_text: str) -> Dict[str, Any]:
+    text = raw_text.strip()
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if match:
+        return json.loads(match.group(0))
+    return json.loads(text)
+
+
 def _evaluate_gemini(prompt: str) -> Optional[JurorVerdict]:
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
@@ -100,7 +109,7 @@ def _evaluate_gemini(prompt: str) -> Optional[JurorVerdict]:
                 response_mime_type="application/json"
             )
         )
-        data = json.loads(response.text)
+        data = _clean_json_response(response.text)
         return JurorVerdict(
             juror_id="juror_gemini",
             model_name="gemini-3.6-flash",
@@ -127,7 +136,7 @@ def _evaluate_openai(prompt: str) -> Optional[JurorVerdict]:
             ],
             response_format={"type": "json_object"}
         )
-        data = json.loads(response.choices[0].message.content)
+        data = _clean_json_response(response.choices[0].message.content)
         return JurorVerdict(
             juror_id="juror_gpt4o",
             model_name="gpt-4o",
@@ -146,7 +155,7 @@ def _evaluate_anthropic(prompt: str) -> Optional[JurorVerdict]:
         import anthropic
         client = anthropic.Anthropic(api_key=api_key)
         response = client.messages.create(
-            model="claude-3-5-sonnet-20240620",
+            model="claude-sonnet-4-5-20250929",
             temperature=0.0,
             max_tokens=1000,
             system=SYSTEM_ARBITRATION_PROMPT,
@@ -155,10 +164,10 @@ def _evaluate_anthropic(prompt: str) -> Optional[JurorVerdict]:
             ]
         )
         content = response.content[0].text
-        data = json.loads(content)
+        data = _clean_json_response(content)
         return JurorVerdict(
             juror_id="juror_claude_sonnet",
-            model_name="claude-3-5-sonnet-20240620",
+            model_name="claude-sonnet-4-5",
             **data
         )
     except Exception as e:
@@ -173,10 +182,6 @@ def deliberate_task(
     precedents: Optional[List[Dict[str, Any]]] = None,
     min_quorum: int = 1
 ) -> ArbitrationResult:
-    """
-    Executes multi-model deliberation, calculates deterministic median consensus,
-    and produces an on-chain verifiable verdict hash.
-    """
     prompt = _build_deliberation_prompt(task_spec, deliverable, precedents)
 
     evaluations: List[JurorVerdict] = []
