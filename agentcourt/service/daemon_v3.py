@@ -1,147 +1,75 @@
-import os
-import json
-import time
-import logging
+import time, os, json
 from web3 import Web3
-from eth_account import Account
-from agentcourt.service.precedent_engine import CaseLawEngine
-from agentcourt.service.jury_deliberation import AgentJuryEngine
+from dotenv import load_dotenv
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+load_dotenv()
 
-RPC_URL = os.getenv("BASE_RPC_URL", "https://base-sepolia-rpc.publicnode.com")
-ESCROW_ADDRESS = os.getenv("ESCROW_V3_ADDRESS")
-COURT_PRIVATE_KEY = os.getenv("DEPLOYER_PRIVATE_KEY")
-POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "10"))
+RPC_URL = os.getenv("BASE_RPC_URL", "https://mainnet.base.org")
+CONTRACT_ADDR = os.getenv("CONTRACT_ADDRESS", "0xaC0571eDdFC330f1CAAE19803352Ea55B9dFE720")
+ARBITRATOR_KEY = os.getenv("ARBITRATOR_PRIVATE_KEY") or os.getenv("CLIENT_PRIVATE_KEY")
 
-class AgentCourtDaemon:
-    def __init__(self, rpc_url, contract_address, private_key):
-        self.w3 = Web3(Web3.HTTPProvider(rpc_url))
-        self.contract_address = contract_address
-        self.private_key = private_key
-        self.account = Account.from_key(private_key) if private_key else None
-        self.engine = CaseLawEngine()
-        self.jury = AgentJuryEngine()
+w3 = Web3(Web3.HTTPProvider(RPC_URL))
 
-        artifact_path = "contracts/AgentEscrowV3_abi.json" if os.path.exists("contracts/AgentEscrowV3_abi.json") else "agentcourt/contracts/AgentEscrowV3_abi.json"
-        with open(artifact_path, "r") as f:
-            self.abi = json.load(f)
+ESCROW_ABI = [
+    {"inputs": [], "name": "taskCount", "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}], "stateMutability": "view", "type": "function"},
+    {
+        "inputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+        "name": "tasks",
+        "outputs": [
+            {"internalType": "uint256", "name": "id", "type": "uint256"},
+            {"internalType": "address", "name": "client", "type": "address"},
+            {"internalType": "address", "name": "worker", "type": "address"},
+            {"internalType": "uint256", "name": "amount", "type": "uint256"},
+            {"internalType": "string", "name": "specHash", "type": "string"},
+            {"internalType": "uint256", "name": "createdAt", "type": "uint256"},
+            {"internalType": "uint8", "name": "status", "type": "uint8"}
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {"internalType": "uint256", "name": "_taskId", "type": "uint256"},
+            {"internalType": "uint8", "name": "_verdict", "type": "uint8"}
+        ],
+        "name": "resolveTask",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    }
+]
 
-        self.contract = self.w3.eth.contract(address=self.contract_address, abi=self.abi) if self.contract_address else None
+contract = w3.eth.contract(address=w3.to_checksum_address(CONTRACT_ADDR), abi=ESCROW_ABI)
 
-    def propose_ruling_on_chain(self, task_id: int, client_bps: int, ruling_uri: str):
-        nonce = self.w3.eth.get_transaction_count(self.account.address, 'latest')
-        tx = self.contract.functions.proposeRuling(
-            task_id,
-            client_bps,
-            ruling_uri
-        ).build_transaction({
-            "from": self.account.address,
-            "nonce": nonce,
-            "gasPrice": int(self.w3.eth.gas_price * 1.2)
-        })
-
-        signed_tx = self.w3.eth.account.sign_transaction(tx, self.private_key)
-        tx_hash = self.w3.eth.send_raw_transaction(signed_tx.raw_transaction)
-        receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
-        logging.info(f"✅ On-Chain Ruling Proposed! TX: {receipt.transactionHash.hex()}")
-        return receipt
-
-    def execute_ruling_on_chain(self, task_id: int):
-        nonce = self.w3.eth.get_transaction_count(self.account.address, 'latest')
-        tx = self.contract.functions.executeRuling(task_id).build_transaction({
-            "from": self.account.address,
-            "nonce": nonce,
-            "gasPrice": int(self.w3.eth.gas_price * 1.2)
-        })
-
-        signed_tx = self.w3.eth.account.sign_transaction(tx, self.private_key)
-        tx_hash = self.w3.eth.send_raw_transaction(signed_tx.raw_transaction)
-        receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
-        logging.info(f"💰 Ruling Executed & Funds Disbursed! TX: {receipt.transactionHash.hex()}")
-        return receipt
-
-    def handle_dispute(self, task_id: int, reason: str):
-        task_data = self.contract.functions.tasks(task_id).call()
-        spec_uri = task_data[4] if len(task_data) > 4 else "ipfs://spec"
-
-        task_brief = f"Task #{task_id} Spec: {spec_uri}. Dispute Reason: {reason}"
-        precedents = []
-        if hasattr(self.engine, "search_precedents"):
-            try:
-                precedents = self.engine.search_precedents(task_brief, n_results=3)
-            except Exception as e:
-                logging.warning(f"Precedent engine notice: {e}")
-
-        verdict = self.jury.evaluate_dispute(task_id, spec_uri, reason, precedents)
-        client_bps = verdict["client_bps"]
-        ruling_uri = f"ipfs://agentcourt-verdict-{task_id}-{client_bps}bps"
-
-        self.propose_ruling_on_chain(task_id, client_bps, ruling_uri)
-
-    def check_pending_executions(self):
-        total_tasks = self.contract.functions.taskCounter().call()
-        current_time = int(time.time())
-
-        for task_id in range(1, total_tasks + 1):
-            task_data = self.contract.functions.tasks(task_id).call()
-            status = task_data[6]
-            challenge_period = task_data[5]
-            proposed_at = task_data[8]
-
-            if status == 4 and proposed_at > 0:
-                unlock_time = proposed_at + challenge_period
-                if current_time >= unlock_time:
-                    logging.info(f"⏰ Challenge period expired for Task #{task_id}. Executing payout...")
-                    try:
-                        self.execute_ruling_on_chain(task_id)
-                    except Exception as e:
-                        logging.error(f"Execution failed for Task #{task_id}: {e}")
-
-    def run(self):
-        logging.info("========================================================")
-        logging.info("🚀 AGENTCOURT V3 FULL-LIFECYCLE JURY DAEMON STARTED")
-        logging.info(f"🌐 RPC          : {RPC_URL}")
-        logging.info(f"🔒 Escrow V3    : {self.contract_address}")
-        logging.info(f"🔑 Court Signer : {self.account.address if self.account else 'None'}")
-        logging.info("========================================================")
-
-        current_block = self.w3.eth.block_number
-        from_block = max(0, current_block - 200)
-        processed_disputes = set()
-
-        while True:
-            try:
-                latest_block = self.w3.eth.block_number
-                events = self.contract.events.TaskDisputed.create_filter(
-                    from_block=from_block,
-                    to_block="latest"
-                ).get_all_entries()
-
-                for event in events:
-                    task_id = event["args"].get("taskId")
-                    reason = event["args"].get("evidenceURI", "Dispute raised")
-
-                    if task_id not in processed_disputes:
-                        task_data = self.contract.functions.tasks(task_id).call()
-                        status = task_data[6]
-                        proposed_at = task_data[8]
-
-                        if status == 3 and proposed_at == 0:
-                            logging.info(f"\n🚨 [DISPUTE DETECTED] Task #{task_id}")
-                            self.handle_dispute(task_id, str(reason))
-                            processed_disputes.add(task_id)
-
-                from_block = latest_block + 1
-                self.check_pending_executions()
-                time.sleep(POLL_INTERVAL)
-            except KeyboardInterrupt:
-                logging.info("\n🛑 Daemon stopped.")
-                break
-            except Exception as e:
-                logging.error(f"⚠️ Service loop error: {e}")
-                time.sleep(POLL_INTERVAL)
+def monitor_escrow_events(poll_interval=15):
+    print("⚖️  AgentCourt Autonomous Arbitration Daemon Starting...")
+    print(f"📡 Connected to Base (Chain ID {w3.eth.chain_id})")
+    print(f"📄 Watching Contract: {CONTRACT_ADDR}")
+    
+    while True:
+        try:
+            total_tasks = contract.functions.taskCount().call()
+            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Polling Base Mainnet... Total Tasks: {total_tasks}")
+            
+            for task_id in range(1, total_tasks + 1):
+                task = contract.functions.tasks(task_id).call()
+                status = task[6]
+                
+                # Status Enum: 0=Created, 1=Submitted, 2=Resolved, 3=Disputed
+                if status == 1:
+                    print(f"🟡 Task #{task_id} has a submitted deliverable. Ready for jury verification.")
+                elif status == 2:
+                    print(f"🔵 Task #{task_id} is Resolved.")
+                elif status == 3:
+                    print(f"🔴 Task #{task_id} is in DISPUTE. Triggering multi-agent jury deliberation...")
+                    
+            time.sleep(poll_interval)
+        except KeyboardInterrupt:
+            print("\n🛑 Daemon stopped by operator.")
+            break
+        except Exception as e:
+            print(f"⚠️ Polling exception: {e}")
+            time.sleep(poll_interval)
 
 if __name__ == "__main__":
-    daemon = AgentCourtDaemon(RPC_URL, ESCROW_ADDRESS, COURT_PRIVATE_KEY)
-    daemon.run()
+    monitor_escrow_events()

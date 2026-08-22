@@ -25,3 +25,15 @@ chroma_db/
 .DS_Store
 .vscode/
 .idea/
+
+# Database & Cache Artifacts
+.chroma_db/
+.court_metadata_cache/
+agentcourt_db/
+agentcourt/.chroma_db/
+agentcourt/agentcourt_db/
+*.py~
+node_modules/
+.env
+.env.*
+!.env.example
