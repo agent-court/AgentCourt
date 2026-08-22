@@ -1,68 +1,75 @@
+"""
+AgentCourt - Precedent Case Law Engine ("Machine Stare Decisis")
+Provides persistent semantic indexing and deterministic retrieval of historical rulings.
+"""
+
 import os
-from typing import List, Dict, Any
+import json
 import chromadb
+from typing import List, Dict, Any, Optional
 
-CHROMA_DATA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agentcourt_db")
+CHROMA_PERSIST_DIR = os.getenv("CHROMA_DIR", "chroma_db")
 
-_client = None
-_collection = None
 
-def get_precedent_collection():
-    global _client, _collection
-    if _collection is None:
-        _client = chromadb.PersistentClient(path=CHROMA_DATA_PATH)
-        _collection = _client.get_or_create_collection(
+class PrecedentEngine:
+    def __init__(self, persist_dir: str = CHROMA_PERSIST_DIR):
+        self.client = chromadb.PersistentClient(path=persist_dir)
+        self.collection = self.client.get_or_create_collection(
             name="agentcourt_precedents",
-            metadata={"description": "Historical dispute resolutions for stare decisis deliberation"}
+            metadata={"hnsw:space": "cosine"}
         )
-    return _collection
 
-def record_new_precedent(case_id: str, title: str, task_spec: str, fact_summary: str, ruling_basis_points: int):
-    collection = get_precedent_collection()
-    document_text = f"Title: {title}\nTask: {task_spec}\nFacts: {fact_summary}\nRuling BPS: {ruling_basis_points}"
-    collection.add(
-        ids=[str(case_id)],
-        documents=[document_text],
-        metadatas=[{
-            "case_id": str(case_id),
-            "title": title,
-            "ruling_basis_points": int(ruling_basis_points),
-            "fact_summary": fact_summary
-        }]
-    )
+    def record_precedent(
+        self,
+        case_id: str,
+        facts: str,
+        issue: str,
+        worker_bps: int,
+        client_bps: int,
+        reasoning: str,
+        tags: Optional[List[str]] = None,
+        verdict_hash: Optional[str] = None
+    ) -> None:
+        """Indexes a settled case into persistent vector memory."""
+        document_text = f"FACTS: {facts}\nISSUE: {issue}\nREASONING: {reasoning}"
+        metadata = {
+            "case_id": case_id,
+            "worker_bps": worker_bps,
+            "client_bps": client_bps,
+            "tags": json.dumps(tags or []),
+            "verdict_hash": verdict_hash or ""
+        }
 
-def find_relevant_precedents(task_spec: str, deliverable_evidence: str, top_k: int = 2) -> List[Dict[str, Any]]:
-    collection = get_precedent_collection()
-    query_text = f"Task: {task_spec}\nDeliverable Evidence: {deliverable_evidence}"
-    
-    count = collection.count()
-    if count == 0:
-        return []
-    
-    results = collection.query(
-        query_texts=[query_text],
-        n_results=min(top_k, count)
-    )
-    
-    precedents = []
-    if results and results.get("metadatas") and len(results["metadatas"]) > 0:
-        for meta in results["metadatas"][0]:
-            precedents.append(meta)
-            
-    return precedents
-
-
-def format_precedents_for_prompt(precedents: List[Dict[str, Any]]) -> str:
-    if not precedents:
-        return "No prior case precedents found. Rely strictly on standard evaluation."
-    
-    formatted = "### LEGAL PRECEDENTS & PRIOR COURT RULINGS (STARE DECISIS):\n"
-    for idx, p in enumerate(precedents, 1):
-        formatted += (
-            f"Precedent Case #{idx} (Case ID: {p.get("case_id")}):\n"
-            f"  - Title / Spec: {p.get("title", "N/A")}\n"
-            f"  - Prior Ruling Award: {p.get("ruling_basis_points")} bps\n"
-            f"  - Case Facts / Rationale: {p.get("fact_summary", "N/A")}\n\n"
+        self.collection.upsert(
+            documents=[document_text],
+            metadatas=[metadata],
+            ids=[case_id]
         )
-    formatted += "Consider these precedents to maintain consistent judicial standards.\n"
-    return formatted
+        print(f"🏛️ Indexed precedent {case_id} (Worker BPS: {worker_bps})")
+
+    def query_precedents(self, query_text: str, top_k: int = 3) -> List[Dict[str, Any]]:
+        """Retrieves top-k relevant case law precedents for juror context."""
+        count = self.collection.count()
+        if count == 0:
+            return []
+
+        results = self.collection.query(
+            query_texts=[query_text],
+            n_results=min(top_k, count)
+        )
+
+        precedents = []
+        if results and results.get("documents") and results["documents"][0]:
+            for i in range(len(results["documents"][0])):
+                doc = results["documents"][0][i]
+                meta = results["metadatas"][0][i]
+                case_data = {
+                    "case_id": meta.get("case_id"),
+                    "facts_and_issue": doc,
+                    "worker_bps": meta.get("worker_bps"),
+                    "client_bps": meta.get("client_bps"),
+                    "tags": json.loads(meta.get("tags", "[]")),
+                    "verdict_hash": meta.get("verdict_hash")
+                }
+                precedents.append(case_data)
+        return precedents
