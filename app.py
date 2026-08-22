@@ -1,217 +1,130 @@
+import os
+import json
 import streamlit as st
-import os, datetime
+import pandas as pd
+from pathlib import Path
 from web3 import Web3
 from dotenv import load_dotenv
 
-# Try importing the Chroma vector precedents module
-try:
-    from vector_precedents import PrecedentEngine
-    vector_engine_available = True
-except Exception:
-    vector_engine_available = False
+from vector_precedents import PrecedentEngine
 
 load_dotenv()
 
 st.set_page_config(
-    page_title="AgentCourt | Base Escrow & Arbitration",
+    page_title="AgentCourt | Autonomous AI Court",
     page_icon="⚖️",
     layout="wide"
 )
 
-st.title("⚖️ AgentCourt Escrow & Arbitration Dashboard")
-st.caption("Decentralized Agent Escrow, Case Resolution & Protocol Treasury on Base Mainnet")
-
-RPC_URL = os.getenv("BASE_RPC_URL", "https://mainnet.base.org")
-CONTRACT_ADDR = os.getenv("CONTRACT_ADDRESS", "0xaC0571eDdFC330f1CAAE19803352Ea55B9dFE720")
-USDC_ADDR = os.getenv("USDC_ADDRESS", "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913")
-TREASURY_ADDR = os.getenv("TREASURY_ADDRESS", "0xc2eC09e66052927D28574DF4AdF0095fe3C425B6")
+RPC_URL = os.getenv("BASE_RPC_URL", "https://base-sepolia-rpc.publicnode.com")
+ESCROW_ADDRESS = os.getenv("ESCROW_CONTRACT_ADDRESS", "0x541521A9a0eb01e4E395F4c43dd8Fe42d89eB723")
+BASESCAN_TX = "https://sepolia.basescan.org/tx/"
+BASESCAN_ADDR = "https://sepolia.basescan.org/address/"
 
 w3 = Web3(Web3.HTTPProvider(RPC_URL))
 
-ESCROW_ABI = [
-    {"inputs": [], "name": "taskCount", "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}], "stateMutability": "view", "type": "function"},
-    {"inputs": [], "name": "treasury", "outputs": [{"internalType": "address", "name": "", "type": "address"}], "stateMutability": "view", "type": "function"},
-    {"inputs": [], "name": "protocolFeeBps", "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}], "stateMutability": "view", "type": "function"},
-    {"inputs": [], "name": "paymentToken", "outputs": [{"internalType": "contract IERC20", "name": "", "type": "address"}], "stateMutability": "view", "type": "function"},
-    {
-        "inputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
-        "name": "tasks",
-        "outputs": [
-            {"internalType": "uint256", "name": "id", "type": "uint256"},
-            {"internalType": "address", "name": "client", "type": "address"},
-            {"internalType": "address", "name": "worker", "type": "address"},
-            {"internalType": "uint256", "name": "amount", "type": "uint256"},
-            {"internalType": "string", "name": "specHash", "type": "string"},
-            {"internalType": "uint256", "name": "createdAt", "type": "uint256"},
-            {"internalType": "uint8", "name": "status", "type": "uint8"}
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {"internalType": "address", "name": "_worker", "type": "address"},
-            {"internalType": "uint256", "name": "_amount", "type": "uint256"},
-            {"internalType": "string", "name": "_specHash", "type": "string"},
-            {"internalType": "uint256", "name": "_durationSeconds", "type": "uint256"}
-        ],
-        "name": "createTask",
-        "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
-        "stateMutability": "nonpayable",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {"internalType": "uint256", "name": "_taskId", "type": "uint256"},
-            {"internalType": "string", "name": "_deliverableHash", "type": "string"}
-        ],
-        "name": "submitTask",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {"internalType": "uint256", "name": "_taskId", "type": "uint256"},
-            {"internalType": "uint8", "name": "_verdict", "type": "uint8"}
-        ],
-        "name": "resolveTask",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function"
-    }
-]
+# Header & Network Metrics
+st.title("⚖️ AgentCourt V5 — Autonomous On-Chain Court")
+st.caption("Deterministic Multi-Model AI Jurors (Gemini • GPT-4o • Claude) & Machine Stare Decisis on Base Sepolia")
 
-USDC_ABI = [
-    {"inputs": [{"internalType": "address", "name": "account", "type": "address"}], "name": "balanceOf", "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}], "stateMutability": "view", "type": "function"}
-]
+# Auto-Refresh Toggle
+auto_refresh = st.sidebar.checkbox("🔄 Enable Auto-Refresh (5s)", value=False)
+if auto_refresh:
+    st.sidebar.caption("Auto-refreshing view every 5 seconds...")
+    st.empty()
 
-if not w3.is_connected():
-    st.error("Failed to connect to Base RPC.")
-    st.stop()
-
-contract = w3.eth.contract(address=w3.to_checksum_address(CONTRACT_ADDR), abi=ESCROW_ABI)
-usdc = w3.eth.contract(address=w3.to_checksum_address(USDC_ADDR), abi=USDC_ABI)
-
-try:
-    live_treasury = contract.functions.treasury().call()
-except Exception:
-    live_treasury = TREASURY_ADDR
-
-with st.sidebar:
-    st.header("🌐 Network & Config")
-    st.success(f"Connected to Base (Chain ID: {w3.eth.chain_id})")
-    st.text_input("Contract Address", CONTRACT_ADDR, disabled=True)
-    st.text_input("USDC Token", USDC_ADDR, disabled=True)
-    st.text_input("Treasury Wallet", live_treasury, disabled=True)
-
-try:
-    total_tasks = contract.functions.taskCount().call()
-    treasury_usdc = usdc.functions.balanceOf(w3.to_checksum_address(live_treasury)).call() / 1e6
-    treasury_eth = w3.from_wei(w3.eth.get_balance(w3.to_checksum_address(live_treasury)), "ether")
-except Exception:
-    total_tasks, treasury_usdc, treasury_eth = 0, 0.0, 0.0
-
-c1, c2, c3, c4 = st.columns(4)
-with c1:
-    st.metric("Total Tasks Created", total_tasks)
-with c2:
-    st.metric("Treasury USDC", f"{treasury_usdc:.4f} USDC")
-with c3:
-    st.metric("Treasury ETH", f"{treasury_eth:.6f} ETH")
-with c4:
-    st.metric("Protocol Fee", "1.50% (150 BPS)")
+col1, col2, col3, col4 = st.columns(4)
+with col1:
+    st.metric("Network", "Base Sepolia (L2)")
+with col2:
+    st.metric("RPC Status", "Connected" if w3.is_connected() else "Disconnected")
+with col3:
+    st.metric("Contract Address", f"{ESCROW_ADDRESS[:6]}...{ESCROW_ADDRESS[-4:]}")
+with col4:
+    head_block = w3.eth.block_number if w3.is_connected() else 0
+    st.metric("Head Block", f"#{head_block}")
 
 st.divider()
 
-tab1, tab2, tab3 = st.tabs(["📋 Task Explorer", "➕ Create Escrow Task", "⚖️ Precedents & Vector AI"])
+tab_cases, tab_vector, tab_benchmarks = st.tabs(["🏛️ On-Chain Ledger", "📚 Machine Stare Decisis", "⚡ Automated Benchmark"])
 
-with tab1:
-    st.subheader("On-Chain Task Explorer")
-    if total_tasks == 0:
-        st.info("No tasks recorded yet.")
-    else:
-        task_id = st.number_input("Task ID", min_value=1, max_value=int(total_tasks), value=int(total_tasks), step=1)
-        try:
-            t = contract.functions.tasks(task_id).call()
-            status_map = {0: "🟢 Created / Funded", 1: "🟡 Submitted", 2: "🔵 Resolved", 3: "🔴 Disputed"}
-            
-            r1, r2 = st.columns(2)
-            with r1:
-                st.markdown(f"**Task ID:** `#{t[0]}`")
-                st.markdown(f"**Client:** `{t[1]}`")
-                st.markdown(f"**Worker:** `{t[2]}`")
-                st.markdown(f"**Amount:** `{t[3] / 1e6:.4f} USDC`")
-            with r2:
-                st.markdown(f"**Spec URI:** `{t[4]}`")
-                try:
-                    created_dt = datetime.datetime.fromtimestamp(t[5], datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-                except Exception:
-                    created_dt = str(t[5])
-                st.markdown(f"**Created:** {created_dt}")
-                st.markdown(f"**Status:** {status_map.get(t[6], f'Status #{t[6]}')}")
-        except Exception as e:
-            st.error(f"Failed to fetch Task #{task_id}: {e}")
-
-with tab2:
-    st.subheader("Create New Escrow Task")
-    with st.form("create_task_form"):
-        worker_input = st.text_input("Worker Address (0x...)")
-        amount_input = st.number_input("Amount (USDC)", min_value=0.01, value=0.20, step=0.05)
-        spec_hash = st.text_input("Spec / IPFS URI", value="ipfs://QmTaskSpecification")
-        duration_days = st.slider("Duration (Days)", min_value=1, max_value=30, value=7)
-        submit_btn = st.form_submit_button("Create & Fund Task")
+# 1. On-Chain Cases Ledger Tab
+with tab_cases:
+    st.subheader("Live Dispute & Escrow Ledger")
+    
+    abi_path = Path("contracts/escrow_abi.json")
+    if abi_path.exists() and ESCROW_ADDRESS:
+        with open(abi_path, "r") as f:
+            abi = json.load(f)
         
-        if submit_btn:
-            if not worker_input or not w3.is_address(worker_input):
-                st.error("Please enter a valid worker address.")
-            else:
-                client_key = os.getenv("CLIENT_PRIVATE_KEY")
-                if not client_key:
-                    st.error("CLIENT_PRIVATE_KEY is not configured in `.env`.")
-                else:
-                    try:
-                        client_acct = w3.eth.account.from_key(client_key)
-                        amt_base = int(amount_input * 1e6)
-                        nonce = w3.eth.get_transaction_count(client_acct.address, "pending")
-                        
-                        tx = contract.functions.createTask(
-                            w3.to_checksum_address(worker_input),
-                            amt_base,
-                            spec_hash,
-                            duration_days * 86400
-                        ).build_transaction({
-                            "from": client_acct.address,
-                            "nonce": nonce,
-                            "gas": 350000,
-                            "gasPrice": int(w3.eth.gas_price * 1.3),
-                            "chainId": 8453
-                        })
-                        signed = w3.eth.account.sign_transaction(tx, client_key)
-                        tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
-                        st.success(f"Transaction submitted! Hash: {tx_hash.hex()}")
-                    except Exception as e:
-                        st.error(f"Transaction failed: {e}")
+        contract = w3.eth.contract(address=w3.to_checksum_address(ESCROW_ADDRESS), abi=abi)
+        total_tasks = contract.functions.taskCounter().call()
+        
+        col_a, col_b = st.columns([1, 4])
+        with col_a:
+            st.metric("Total Tasks Logged", total_tasks)
+            if st.button("🔄 Refresh Data"):
+                st.rerun()
 
-with tab3:
-    st.subheader("Dispute Precedent Vector Engine (ChromaDB)")
-    st.caption("Search past arbitration cases to find semantic matches and historical jury decisions.")
-    
-    query = st.text_input("Case Description / Dispute Query", placeholder="e.g. Worker deliverable missing unit tests and Swagger docs")
-    k_val = st.slider("Max Precedents to Retrieve", min_value=1, max_value=5, value=3)
-    
-    if st.button("Query Vector Memory"):
-        if not query:
-            st.warning("Please enter a dispute description to search.")
-        else:
+        task_rows = []
+        states_map = {0: "Created", 1: "Funded", 2: "Started", 3: "Completed", 4: "Disputed", 5: "Settled"}
+        
+        for i in range(1, total_tasks + 1):
             try:
-                if vector_engine_available:
-                    engine = PrecedentEngine()
-                    results = engine.search(query, n_results=k_val)
-                    st.success(f"Found matches in ChromaDB vector collection:")
-                    for doc, meta in results:
-                        st.info(f"**Match:** {doc}\n\n*Metadata:* `{meta}`")
-                else:
-                    st.info(f"Vector search active for query: '{query}' (Chroma DB loaded via vector_precedents.py)")
-            except Exception as e:
-                st.warning(f"Vector lookup notice: {e}")
+                task = contract.functions.tasks(i).call()
+                state_str = states_map.get(task[6], "Unknown")
+                task_rows.append({
+                    "Task": f"#{task[0]}",
+                    "Client": f"{task[1][:6]}...{task[1][-4:]}",
+                    "Worker": f"{task[2][:6]}...{task[2][-4:]}",
+                    "State": f"🟢 {state_str}" if state_str == "Settled" else (f"⚠️ {state_str}" if state_str == "Disputed" else state_str),
+                    "Worker Payout": f"{task[7] / 100:.1f}% ({task[7]} BPS)" if task[6] == 5 else "Pending",
+                    "Verdict Digest": f"0x{task[8].hex()[:12]}..." if task[6] == 5 else "—",
+                })
+            except Exception:
+                pass
+        
+        if task_rows:
+            df = pd.DataFrame(task_rows)
+            st.dataframe(df, use_container_width=True, hide_index=True)
+            
+        st.caption(f"Contract Explorer: [{ESCROW_ADDRESS}]({BASESCAN_ADDR}{ESCROW_ADDRESS})")
+    else:
+        st.warning("Escrow contract ABI or address not found.")
+
+# 2. Vector Memory Tab
+with tab_vector:
+    st.subheader("ChromaDB Machine Stare Decisis Index")
+    engine = PrecedentEngine()
+    count = engine.collection.count()
+    st.metric("Indexed Precedent Citations", count)
+    
+    cases = engine.collection.get(include=["documents", "metadatas"])
+    if cases and cases.get("ids"):
+        for i, cid in enumerate(cases["ids"]):
+            with st.expander(f"📖 Reference Case: {cid}"):
+                meta = cases["metadatas"][i]
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.write(f"**Worker Allocation:** `{meta.get('worker_bps', 'N/A')} BPS`")
+                    st.write(f"**Client Allocation:** `{meta.get('client_bps', 'N/A')} BPS`")
+                with c2:
+                    st.write(f"**Deliberation Summary:** {meta.get('reasoning', 'N/A')}")
+                st.write("**Case Evidence / Spec:**")
+                st.info(cases["documents"][i])
+
+# 3. Benchmark Tab
+with tab_benchmarks:
+    st.subheader("Quorum Performance & Consensus Speed")
+    st.caption("Run automated benchmark cycles measuring multi-model LLM latency, gas costs, and settlement blocks.")
+    
+    if st.button("🚀 Run Synthetic Dispute Benchmark (3 Cases)"):
+        with st.spinner("Executing benchmark suite..."):
+            os.system("python scripts/run_benchmark.py")
+        st.success("Benchmark completed! Refreshing case ledger.")
+        st.rerun()
+
+if auto_refresh:
+    import time
+    time.sleep(5)
+    st.rerun()
