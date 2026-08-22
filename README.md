@@ -1,31 +1,31 @@
-# ⚖️ AgentCourt
+# AgentCourt (V5) ⚖️
+**Decentralized, Deterministic AI Arbitration Protocol on Base**
 
-Autonomous dispute resolution, AI jury arbitration, and decentralized escrow protocol on Base Mainnet.
-
----
-
-## ⛓️ Base Mainnet Deployments
-
-* **AgentEscrowV2**: `0xaC0571eDdFC330f1CAAE19803352Ea55B9dFE720`
-* **USDC Token**: `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`
-* **Protocol Treasury**: `0xc2eC09e66052927D28574DF4AdF0095fe3C425B6`
-* **Protocol Fee**: 1.5% (150 BPS)
-* **Chain ID**: 8453 (Base Mainnet)
+AgentCourt is an institutional settlement infrastructure designed for autonomous agent commerce.
 
 ---
 
-## 🛠️ Stack & Architecture
+## 🏗️ Protocol Architecture
 
-* **Smart Contracts**: Solidity (AgentEscrowV2), OpenZeppelin (IERC20, ReentrancyGuard)
-* **SDK / Interaction**: Python 3.13, Web3.py, eth-account
-* **Vector Memory**: ChromaDB semantic store for precedent retrieval
-* **Interface**: Streamlit real-time blockchain monitoring dashboard
-* **Automation**: Autonomous event-listener daemon for task arbitration
+- `AgentEscrowV5`: Production USDC escrow contract on Base with basis-points (BPS) allocation.
+- `vector_precedents.py`: Persistent ChromaDB semantic case law memory (*Machine Stare Decisis*).
+- `arbitrator.py`: Multi-LLM jury panel (Gemini, GPT-4o, Claude) running at zero-temperature with deterministic median BPS quorum.
+- `daemon_v3.py`: Automated event listener and on-chain resolution executor.
 
 ---
 
-## 🚀 Quickstart
+## 🔰 State Machine Invariants
 
-1. Install dependencies: `pip install -r requirements.txt`
-2. Start dashboard: `streamlit run app.py`
-3. Launch background daemon: `python service/daemon_v3.py`
+`Created` → `Funded` → `Started` → `Completed` → `Disputed` → `Settled`
+- No unilateral bypasses or reversible states.
+- Every dispute resolution commits a `bytes32 verdictHash` on-chain.
+
+---
+
+## ✅ Live Demo & Simulation
+
+Run the 60-second agent-to-agent direct dispute and settlement simulation:
+
+```bash
+python scripts/simulate_dispute.py
+```

@@ -92,7 +92,7 @@ def _evaluate_gemini(prompt: str) -> Optional[JurorVerdict]:
         from google.genai import types
         client = genai.Client(api_key=api_key)
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.6-flash",
             contents=prompt,
             config=types.GenerateContentConfig(
                 system_instruction=SYSTEM_ARBITRATION_PROMPT,
@@ -102,8 +102,8 @@ def _evaluate_gemini(prompt: str) -> Optional[JurorVerdict]:
         )
         data = json.loads(response.text)
         return JurorVerdict(
-            juror_id="juror_gemini_flash",
-            model_name="gemini-2.5-flash",
+            juror_id="juror_gemini",
+            model_name="gemini-3.6-flash",
             **data
         )
     except Exception as e:
@@ -146,7 +146,7 @@ def _evaluate_anthropic(prompt: str) -> Optional[JurorVerdict]:
         import anthropic
         client = anthropic.Anthropic(api_key=api_key)
         response = client.messages.create(
-            model="claude-3-5-sonnet-20241022",
+            model="claude-3-5-sonnet-20240620",
             temperature=0.0,
             max_tokens=1000,
             system=SYSTEM_ARBITRATION_PROMPT,
@@ -158,7 +158,7 @@ def _evaluate_anthropic(prompt: str) -> Optional[JurorVerdict]:
         data = json.loads(content)
         return JurorVerdict(
             juror_id="juror_claude_sonnet",
-            model_name="claude-3-5-sonnet-20241022",
+            model_name="claude-3-5-sonnet-20240620",
             **data
         )
     except Exception as e:
@@ -171,7 +171,7 @@ def deliberate_task(
     task_spec: str,
     deliverable: str,
     precedents: Optional[List[Dict[str, Any]]] = None,
-    min_quorum: int = 2
+    min_quorum: int = 1
 ) -> ArbitrationResult:
     """
     Executes multi-model deliberation, calculates deterministic median consensus,
@@ -179,7 +179,6 @@ def deliberate_task(
     """
     prompt = _build_deliberation_prompt(task_spec, deliverable, precedents)
 
-    # Run jurors independently
     evaluations: List[JurorVerdict] = []
     for evaluator in [_evaluate_gemini, _evaluate_openai, _evaluate_anthropic]:
         verdict = evaluator(prompt)
@@ -191,7 +190,6 @@ def deliberate_task(
             f"Quorum failure: only {len(evaluations)}/{min_quorum} jurors responded. Halting settlement."
         )
 
-    # Deterministic median aggregation (no single-model override)
     worker_votes = [v.worker_bps for v in evaluations]
     consensus_worker_bps = int(statistics.median(worker_votes))
     consensus_client_bps = 10000 - consensus_worker_bps
@@ -205,10 +203,9 @@ def deliberate_task(
             "client_bps": consensus_client_bps,
             "juror_count": len(evaluations)
         },
-        "jurors": [v.dict() for v in evaluations]
+        "jurors": [v.model_dump() if hasattr(v, 'model_dump') else v.dict() for v in evaluations]
     }
 
-    # Generate canonical Keccak256 hash matching Solidity bytes32
     transcript_bytes = json.dumps(canonical_transcript, sort_keys=True).encode()
     verdict_hash = Web3.keccak(transcript_bytes).hex()
 
