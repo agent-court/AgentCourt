@@ -106,6 +106,7 @@ def _evaluate_gemini(prompt: str) -> Optional[JurorVerdict]:
             config=types.GenerateContentConfig(
                 system_instruction=SYSTEM_ARBITRATION_PROMPT,
                 temperature=0.0,
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True) if hasattr(types, 'AutomaticFunctionCallingConfig') else None,
                 response_mime_type="application/json"
             )
         )
@@ -130,6 +131,7 @@ def _evaluate_openai(prompt: str) -> Optional[JurorVerdict]:
         response = client.chat.completions.create(
             model="gpt-4o",
             temperature=0.0,
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True) if hasattr(types, 'AutomaticFunctionCallingConfig') else None,
             messages=[
                 {"role": "system", "content": SYSTEM_ARBITRATION_PROMPT},
                 {"role": "user", "content": prompt}
@@ -157,6 +159,7 @@ def _evaluate_anthropic(prompt: str) -> Optional[JurorVerdict]:
         response = client.messages.create(
             model="claude-sonnet-4-5-20250929",
             temperature=0.0,
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True) if hasattr(types, 'AutomaticFunctionCallingConfig') else None,
             max_tokens=1000,
             system=SYSTEM_ARBITRATION_PROMPT,
             messages=[
