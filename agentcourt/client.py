@@ -1,4 +1,5 @@
 import os
+import time
 from typing import Optional, Dict, Any
 from web3 import Web3
 
@@ -30,19 +31,38 @@ class AgentCourtClient:
             contract_address or os.getenv("ESCROW_CONTRACT_ADDRESS", DEFAULT_CONTRACT_ADDRESS)
         )
         self.contract = self.w3.eth.contract(address=self.contract_address, abi=DEFAULT_ABI)
+        self._current_nonce = None
 
-    def _send_tx(self, fn_call, gas: int = 300000) -> Dict[str, Any]:
-        tx = fn_call.build_transaction({
-            "from": self.account.address,
-            "nonce": self.w3.eth.get_transaction_count(self.account.address, "pending"),
-            "gas": gas,
-            "gasPrice": self.w3.eth.gas_price,
-            "chainId": self.w3.eth.chain_id,
-        })
-        signed = self.w3.eth.account.sign_transaction(tx, self.account.key)
-        tx_hash = self.w3.eth.send_raw_transaction(signed.raw_transaction)
-        receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
-        return {"status": receipt.status, "tx_hash": tx_hash.hex(), "blockNumber": receipt.blockNumber}
+    def _get_nonce(self) -> int:
+        onchain_nonce = self.w3.eth.get_transaction_count(self.account.address, "pending")
+        if self._current_nonce is None or onchain_nonce > self._current_nonce:
+            self._current_nonce = onchain_nonce
+        else:
+            self._current_nonce += 1
+        return self._current_nonce
+
+    def _send_tx(self, fn_call, gas: int = 350000, retries: int = 3) -> Dict[str, Any]:
+        for attempt in range(retries):
+            try:
+                nonce = self._get_nonce()
+                tx = fn_call.build_transaction({
+                    "from": self.account.address,
+                    "nonce": nonce,
+                    "gas": gas,
+                    "gasPrice": int(self.w3.eth.gas_price * 1.2),
+                    "chainId": self.w3.eth.chain_id,
+                })
+                signed = self.w3.eth.account.sign_transaction(tx, self.account.key)
+                tx_hash = self.w3.eth.send_raw_transaction(signed.raw_transaction)
+                receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
+                return {"status": receipt.status, "tx_hash": tx_hash.hex(), "blockNumber": receipt.blockNumber}
+            except Exception as e:
+                err_msg = str(e).lower()
+                if "nonce" in err_msg and attempt < retries - 1:
+                    time.sleep(1.5)
+                    self._current_nonce = self.w3.eth.get_transaction_count(self.account.address, "latest")
+                    continue
+                raise e
 
     def create_task(self, worker_address: str, amount_usdc: int, spec_text: str) -> int:
         spec_hash = Web3.keccak(text=spec_text)
